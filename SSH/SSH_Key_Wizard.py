@@ -454,6 +454,76 @@ def get_username_suggestions():
 
     return suggestions
 
+def review_payload(payload_path):
+    """Interactively review and prune the payload file."""
+    if not os.path.exists(payload_path):
+        return
+
+    print(f"\n{Style.BOLD}🛡️  Security Review: {os.path.basename(payload_path)}{Style.RESET}")
+    
+    try:
+        with open(payload_path, 'r') as f:
+            lines = [line.strip() for line in f if line.strip()]
+        
+        if not lines:
+            print(f"   {Style.DIM}(Payload is empty){Style.RESET}")
+            return
+
+        # Simple parser to extract comments for display
+        print(f"   Found {len(lines)} authorized key(s).")
+        print(f"   {Style.YELLOW}Review carefully. Remove keys that are no longer needed.{Style.RESET}")
+        
+        keep_indices = set(range(len(lines)))
+        
+        while True:
+            print(f"\n   {Style.BOLD}Current Payload:{Style.RESET}")
+            for i, line in enumerate(lines):
+                # Extract comment (last field)
+                parts = line.split()
+                comment = parts[-1] if len(parts) > 2 else "(no comment)"
+                short_key = parts[1][:20] + "..." if len(parts) > 1 else "..."
+                
+                status = "✅ KEEP" if i in keep_indices else "❌ REMOVE"
+                color = Style.GREEN if i in keep_indices else Style.RED
+                
+                print(f"   [{i+1}] {color}{status}{Style.RESET} : {comment} {Style.DIM}({short_key}){Style.RESET}")
+            
+            print(f"\n   Actions: [Number] to toggle, [A]ccept, [C]lear All, [Q]uit (No Change)")
+            choice = get_input("Action", "A").upper()
+            
+            if choice == 'A':
+                # Save changes
+                new_lines = [lines[i] for i in sorted(keep_indices)]
+                with open(payload_path, 'w') as f:
+                    for line in new_lines:
+                        f.write(line + "\n")
+                if len(keep_indices) < len(lines):
+                    print_success(f"Updated payload. Removed {len(lines) - len(keep_indices)} key(s).")
+                    log_action(f"PAYLOAD PRUNED: Removed {len(lines) - len(keep_indices)} keys.")
+                break
+                
+            elif choice == 'C':
+                confirm = get_input("Remove ALL keys from payload? (yes/no)", "no")
+                if confirm.lower() == 'yes':
+                    keep_indices = set()
+            
+            elif choice == 'Q':
+                print("   Review cancelled. No changes made.")
+                break
+                
+            else:
+                try:
+                    idx = int(choice) - 1
+                    if 0 <= idx < len(lines):
+                        if idx in keep_indices:
+                            keep_indices.remove(idx)
+                        else:
+                            keep_indices.add(idx)
+                except: pass
+                
+    except Exception as e:
+        print_error(f"Error reading payload: {e}")
+
 def get_hardware_id():
     """Detects hardware model and year to generate a concise ID (e.g. mba2023, dellxps2024)."""
     system = platform.system().lower()
@@ -544,6 +614,12 @@ def create_deployment_package(output_dir, payload_path, final_user, device_name)
     
     if create_pkg.lower() not in ['yes', 'y']:
         return
+
+    # Security Review
+    if os.path.exists(payload_path):
+        review = get_input("Review/Prune authorized keys list before packaging? (yes/no)", "yes")
+        if review.lower() == "yes":
+            review_payload(payload_path)
 
     # 1. Prepare Staging Area
     staging_dir = os.path.join(output_dir, "Deploy_Package_Staging")
