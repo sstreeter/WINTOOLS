@@ -686,9 +686,11 @@ def create_deployment_package(output_dir, payload_path, final_user, device_name)
 
     # Security Review
     if os.path.exists(payload_path):
-        review = get_input("Review/Prune authorized keys list before packaging? (yes/no)", "yes")
+        review = get_input("Quick Review of key list? (yes/no)", "no")
         if review.lower() == "yes":
             review_payload(payload_path)
+        else:
+             print(f"   {Style.DIM}(Using current payload as-is. Use Menu Option 0 for full audit){Style.RESET}")
 
     # 1. Prepare Staging Area
     staging_dir = os.path.join(output_dir, "Deploy_Package_Staging")
@@ -1020,6 +1022,7 @@ def main():
         print(f"  [{Style.CYAN}5{Style.RESET}] ♻️   RESET and Archive Everything")
         print(f"  [{Style.CYAN}6{Style.RESET}] 🚪  Exit")
         print(f"{Style.BLUE}----------------------------------------{Style.RESET}")
+        print(f"  [{Style.CYAN}0{Style.RESET}] 🛡️  Review/Edit Authorized Keys Payload")
         print(f"  [{Style.CYAN}7{Style.RESET}] 🎒  Create Portable Wizard (Clean Zip)")
         print(f"  [{Style.CYAN}8{Style.RESET}] 🔗  Merge Another Payload File")
         print(f"  [{Style.CYAN}9{Style.RESET}] 🔧  Install/Repair Local Key")
@@ -1030,6 +1033,11 @@ def main():
             if choice == "6":
                 print(f"\n{Style.DIM}Goodbye 👋{Style.RESET}")
                 sys.exit(0)
+
+            elif choice == "0":
+                payload_path = os.path.join(default_dir, "AuthorizedKeysPayload.txt")
+                review_payload(payload_path)
+                continue
 
             elif choice == "5":
                 archive_current_state(default_dir)
