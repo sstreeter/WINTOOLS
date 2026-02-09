@@ -582,6 +582,21 @@ def review_payload(payload_path):
             # ... (Putting the real code below) ...
             
             if choice == 'A':
+                # Safety Check: Current Key Removal
+                removing_current = False
+                for i, line in enumerate(lines):
+                    parts = line.split()
+                    key_body = parts[1] if len(parts) > 1 else ""
+                    if key_body in local_pub_keys and i not in keep_indices:
+                        removing_current = True
+                        break
+                
+                if removing_current:
+                    print(f"\n{Style.RED}⚠️  WARNING: You are about to remove your CURRENT ACTIVE KEY from the payload!{Style.RESET}")
+                    print(f"   This might lock you out or break future deployments.")
+                    if get_input("Are you sure? (yes/no)", "no").lower() != 'yes':
+                        continue # Cancel action, return to loop
+                
                  # Save changes (preserving sorted order)
                 new_lines = [lines[i] for i in range(len(lines)) if i in keep_indices]
                 with open(payload_path, 'w') as f:
