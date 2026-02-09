@@ -53,3 +53,7 @@ IconForge/resources/temp/
 *.swp
 *.swo
 *~
+
+# 📦 Deployment Artifacts (DO NOT COMMIT)
+*.zip
+SSH/Deploy_Package_Staging/
