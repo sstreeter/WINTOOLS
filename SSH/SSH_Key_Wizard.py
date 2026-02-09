@@ -336,8 +336,88 @@ class InputPolicy:
         if not clean: return "user"
         return clean
 
-def get_username_suggestions():
-    """Get list of potential usernames based on system info."""
+def install_key_menu(default_dir):
+    """Menu interface for installing local keys."""
+    print(f"\n{Style.BOLD}🔧 Install/Repair Local Key:{Style.RESET}")
+    
+    # 1. Find Keys
+    keys = [f for f in os.listdir(default_dir) if f.startswith("id_ed25519") and not f.endswith(".pub")]
+    
+    if not keys:
+        print(f"   {Style.DIM}(No keys found in {default_dir}){Style.RESET}")
+        get_input("Press Enter to return to menu", allow_empty=True)
+        return
+
+    # 2. Select Key
+    print(f"Select a private key to install:")
+    for i, name in enumerate(keys):
+        print(f"   [{Style.CYAN}{i+1}{Style.RESET}] {name}")
+    print(f"   [{Style.CYAN}0{Style.RESET}] Cancel")
+
+    choice = get_input("\nSelect Key", "0")
+    if choice == '0': return
+    
+    selected_key = ""
+    try:
+        idx = int(choice) - 1
+        if 0 <= idx < len(keys):
+            selected_key = os.path.join(default_dir, keys[idx])
+        else:
+             return
+    except: return
+
+    # 3. Destination
+    default_dest_dir = os.path.expanduser("~")
+    try:
+        default_dest_dir = os.path.join(os.path.expanduser("~"), ".ssh")
+    except: pass
+    
+    print(f"\n{Style.BOLD}Where should this key go?{Style.RESET}")
+    print(f"Default: {default_dest_dir}")
+    print(f"(Enter a custom path or press Enter for default)")
+    
+    custom_dest = get_input("Destination Folder", allow_empty=True)
+    if not custom_dest:
+        dest_dir = default_dest_dir
+    else:
+        dest_dir = os.path.expanduser(custom_dest) # Handle ~/ expansion if user typed it
+    
+    # 4. Install Logic (Adapted from install_local_key but with custom dest)
+    try:
+        if not os.path.exists(dest_dir):
+            try:
+                os.makedirs(dest_dir, mode=0o700, exist_ok=True)
+                print(f"   Created directory: {dest_dir}")
+            except Exception as e:
+                print_error(f"Could not create directory '{dest_dir}': {e}")
+                get_input("Press Enter", allow_empty=True)
+                return
+
+        dest_path = os.path.join(dest_dir, os.path.basename(selected_key))
+        
+        # Check collision
+        if os.path.exists(dest_path):
+            overwrite = get_input(f"{Style.YELLOW}⚠️  File '{os.path.basename(dest_path)}' exists! Overwrite? (yes/no){Style.RESET}", "no")
+            if overwrite.lower() != 'yes':
+                print("   Skipping.")
+                get_input("Press Enter", allow_empty=True)
+                return
+
+        shutil.copy2(selected_key, dest_path)
+        print_success(f"Key installed to: {dest_path}")
+        
+        if os.name == 'posix':
+            try:
+                os.chmod(dest_path, 0o600)
+                print(f"   🔒 Permissions set to 600 (rw-------)")
+            except Exception as e:
+                print(f"   {Style.YELLOW}⚠️  Could not set permissions: {e}{Style.RESET}")
+
+        get_input("Press Enter to return", allow_empty=True)
+
+    except Exception as e:
+        print_error(f"Installation failed: {e}")
+        get_input("Press Enter", allow_empty=True)
     suggestions = []
     
     # 1. System Username
@@ -785,6 +865,7 @@ def main():
         print(f"{Style.BLUE}----------------------------------------{Style.RESET}")
         print(f"  [{Style.CYAN}7{Style.RESET}] 🎒  Create Portable Wizard (Clean Zip)")
         print(f"  [{Style.CYAN}8{Style.RESET}] 🔗  Merge Another Payload File")
+        print(f"  [{Style.CYAN}9{Style.RESET}] 🔧  Install/Repair Local Key")
         
         try:
             choice = get_input("\nSelect Option")
@@ -805,6 +886,10 @@ def main():
             elif choice == "8":
                 payload_path = os.path.join(default_dir, "AuthorizedKeysPayload.txt")
                 merge_external_payload(payload_path)
+                continue
+                
+            elif choice == "9":
+                install_key_menu(default_dir)
                 continue
 
             elif choice == "4":
