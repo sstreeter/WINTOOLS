@@ -32,7 +32,7 @@ param (
     [string[]]$AdminKeys = @(),
     [string]$KeysFile,
     [int]$SSHPort = 22,
-    [bool]$DisablePasswordAuth = $false,
+    [switch]$DisablePasswordAuth,
     [switch]$Silent
 )
 

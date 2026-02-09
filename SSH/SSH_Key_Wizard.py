@@ -452,7 +452,9 @@ INSTRUCTIONS:
 2. Open PowerShell as Administrator.
 3. Run the following command to install OpenSSH and configure the keys:
 
-   powershell -ExecutionPolicy Bypass -File .\\Deploy-OpenSSH.ps1 -KeysFile .\\{payload_name} -DisablePasswordAuth $true
+   powershell -ExecutionPolicy Bypass -File .\\Deploy-OpenSSH.ps1 `
+     -KeysFile .\\{payload_name} `
+     -DisablePasswordAuth
 
 4. CLIENT SETUP (On your Admin/Connect machine):
    -----------------------------------------------
