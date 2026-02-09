@@ -469,6 +469,19 @@ def review_payload(payload_path):
             print(f"   {Style.DIM}(Payload is empty){Style.RESET}")
             return
 
+        # 1. Identify CURRENT keys (present in local directory)
+        local_pub_keys = set()
+        dir_path = os.path.dirname(payload_path)
+        for f in os.listdir(dir_path):
+            if f.endswith(".pub"):
+                try:
+                     with open(os.path.join(dir_path, f), 'r') as pf:
+                         content = pf.read().strip().split()
+                         if len(content) >= 2:
+                             # Store the key body (part 1)
+                             local_pub_keys.add(content[1])
+                except: pass
+
         # Sort by Date (Newest First)
         # Key format: ... user@host-YYYY-MM-DD
         import re
@@ -494,23 +507,37 @@ def review_payload(payload_path):
         
         while True:
             print(f"\n   {Style.BOLD}Current Payload (Sorted Newest-to-Oldest):{Style.RESET}")
+            legacy_count = 0
+            
             for i, line in enumerate(lines):
                 parts = line.split()
-                comment = parts[-1] if len(parts) > 2 else "(no comment)"
-                short_key = parts[1][:15] + "..." if len(parts) > 1 else "..."
                 
+                # Metadata
+                key_body = parts[1] if len(parts) > 1 else ""
+                comment = parts[-1] if len(parts) > 2 else "(no comment)"
+                short_key = key_body[:15] + "..." if key_body else "..."
+                
+                # Detection
+                is_current = key_body in local_pub_keys
+                is_legacy = "@" not in comment and "202" not in comment # Heuristic for non-standard
+                if is_legacy: legacy_count += 1
+                
+                # Formatting
                 status = "✅ KEEP" if i in keep_indices else "❌ REMOVE"
                 color = Style.GREEN if i in keep_indices else Style.RED
                 
-                # Highlight date if present
-                date_str = ""
-                date_match = re.search(r'(\d{4}-\d{2}-\d{2})', comment)
-                if date_match:
-                    date_str = f"{Style.CYAN}[{date_match.group(1)}]{Style.RESET} "
+                tags = ""
+                if is_current: tags += f"{Style.BOLD}{Style.CYAN}[CURRENT KEY] {Style.RESET}"
+                if is_legacy:  tags += f"{Style.YELLOW}[LEGACY?] {Style.RESET}"
                 
-                print(f"   [{i+1}] {color}{status}{Style.RESET} : {date_str}{comment} {Style.DIM}({short_key}){Style.RESET}")
+                # Highlight date if present
+                date_match = re.search(r'(\d{4}-\d{2}-\d{2})', comment)
+                if date_match and not is_current: # Don't double highlight current
+                    tags += f"{Style.DIM}[{date_match.group(1)}]{Style.RESET} "
+                
+                print(f"   [{i+1}] {color}{status}{Style.RESET} : {tags}{comment} {Style.DIM}({short_key}){Style.RESET}")
             
-            print(f"\n   Actions: [Number] to toggle, [A]ccept, [C]lear All, [Q]uit (No Change)")
+            print(f"\n   Actions: [Number] to toggle, [P]urge Legacy/Unknown, [A]ccept, [C]lear All, [Q]uit")
             choice = get_input("Action", "A").upper()
             
             if choice == 'A':
@@ -527,7 +554,23 @@ def review_payload(payload_path):
                 elif len(new_lines) == len(lines):
                      print("   Payload re-saved (sorted).")
                 break
-                
+            
+            elif choice == 'P':
+                 # Purge Legacy
+                 if legacy_count == 0:
+                     print("   No legacy keys detected.")
+                 else:
+                     confirm = get_input(f"Remove {legacy_count} suspected legacy keys? (yes/no)", "yes")
+                     if confirm.lower() == 'yes':
+                         # Identify legacy indices
+                         for i, line in enumerate(lines):
+                             parts = line.split()
+                             comment = parts[-1] if len(parts) > 2 else ""
+                             is_legacy = "@" not in comment and "202" not in comment
+                             if is_legacy and i in keep_indices:
+                                 keep_indices.remove(i)
+                         print(f"   Marked {legacy_count} keys for removal.")
+            
             elif choice == 'C':
                 confirm = get_input("Remove ALL keys from payload? (yes/no)", "no")
                 if confirm.lower() == 'yes':
