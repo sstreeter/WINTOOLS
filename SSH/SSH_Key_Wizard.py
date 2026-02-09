@@ -193,7 +193,12 @@ def generate_key(user, target_platform, output_dir, interactive=True):
     try:
         subprocess.run(cmd, check=True) # stdout/stderr allowed for q
         print_success(f"Key Generated: {key_name}")
+        print_success(f"Key Generated: {key_name}")
         log_action(f"GENERATED NEW KEY: {key_name} (User: {user}, Device: {target_platform}) | Path: {key_path}")
+        
+        if interactive:
+            install_local_key(key_path)
+            
         return key_path, pub_key_path
     except subprocess.CalledProcessError as e:
         print_error(f"Error generating key: {e}")
@@ -231,7 +236,58 @@ def archive_current_state(output_dir):
         os.makedirs(output_dir, exist_ok=True)
     except Exception as e:
         print_error(f"Failed to archive state: {e}")
+def install_local_key(priv_key_path):
+    """Offers to install the private key to the user's local .ssh directory."""
+    
+    # 1. Detect .ssh directory
+    try:
+        user_home = os.path.expanduser("~")
+        ssh_dir = os.path.join(user_home, ".ssh")
+    except Exception:
+        # Fallback if expanduser fails (rare)
+        return
 
+    print(f"\n{Style.BOLD}--- Client Setup ---{Style.RESET}")
+    print(f"Would you like to install the private key to your local SSH client?")
+    print(f"   Source: {priv_key_path}")
+    print(f"   Dest:   {os.path.join(ssh_dir, os.path.basename(priv_key_path))}")
+    
+    choice = get_input("Install Key? (yes/no)", "yes")
+    if choice.lower() != "yes":
+        return
+
+    try:
+        # 2. Create .ssh if missing
+        if not os.path.exists(ssh_dir):
+            os.makedirs(ssh_dir, mode=0o700, exist_ok=True)
+            print(f"   Created directory: {ssh_dir}")
+
+        dest_path = os.path.join(ssh_dir, os.path.basename(priv_key_path))
+        
+        # 3. Check collision
+        if os.path.exists(dest_path):
+            overwrite = get_input(f"{Style.YELLOW}⚠️  Key file already exists! Overwrite? (yes/no){Style.RESET}", "no")
+            if overwrite.lower() != 'yes':
+                print("   Skipping installation.")
+                return
+
+        # 4. Copy
+        shutil.copy2(priv_key_path, dest_path)
+        print_success(f"Key installed to: {dest_path}")
+        
+        # 5. Fix Permissions (Posix only)
+        if os.name == 'posix':
+            try:
+                os.chmod(dest_path, 0o600)
+                print(f"   🔒 Permissions set to 600 (rw-------)")
+            except Exception as e:
+                print(f"   {Style.YELLOW}⚠️  Could not set permissions: {e}{Style.RESET}")
+                
+        log_action(f"KEY INSTALLED: {dest_path}")
+        
+    except Exception as e:
+        print_error(f"Failed to install key: {e}")
+        get_input("Press Enter to continue...", allow_empty=True)
 # --- Input Policy ---
 class InputPolicy:
     """Centralized policy for input validation and sanitization."""
