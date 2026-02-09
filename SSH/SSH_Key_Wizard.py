@@ -557,6 +557,8 @@ def create_deployment_package(output_dir, payload_path, final_user, device_name)
     files_to_copy = {
         "Deploy-OpenSSH.ps1": "Deploy-OpenSSH.ps1",
         "Uninstall-OpenSSH.ps1": "Uninstall-OpenSSH.ps1",
+        "Deploy-Linux.sh": "Deploy-Linux.sh",
+        "Deploy-Mac.sh": "Deploy-Mac.sh",
     }
     
     payload_name = os.path.basename(payload_path)
@@ -587,33 +589,40 @@ Target Device: {device_name} (User: {final_user})
 
 INSTRUCTIONS:
 -------------
-1. Copy this entire folder (or unzip it) to the target Windows machine.
-2. Open PowerShell as Administrator.
-3. Run the following command to install OpenSSH and configure the keys:
+IMPORTANT: SSH Keys authorize a specific USER account.
+- If you are setting up a server for everyone, install these keys to the 'Administrator' or 'root' account.
+- Ensure the target computer actually HAS the user account you want to log in as!
 
+[WINDOWS]
+1. Copy folder to target PC.
+2. Open PowerShell as Administrator.
+3. Run:
    powershell -ExecutionPolicy Bypass -File .\\Deploy-OpenSSH.ps1 `
      -KeysFile .\\{payload_name} `
      -DisablePasswordAuth
 
-4. CLIENT SETUP (On your Admin/Connect machine):
-   -----------------------------------------------
-   You must have the PRIVATE key ({priv_key_name}) on the computer you are connecting FROM.
-   
-   Option A (Recommended): continuous use
-   - Move the private key to your user's .ssh directory (e.g., C:\\Users\\You\\.ssh\\ or ~/.ssh/).
-   - Connect using: ssh {final_user}@{device_name}
-   
-   Option B: One-off use
-   - Keep the key anywhere and specify it:
-   - ssh -i "path\\to\\{priv_key_name}" {final_user}@{device_name}
+[LINUX]
+1. Copy folder to target machine.
+2. Run:
+   sudo bash ./Deploy-Linux.sh
 
-5. To test connectivity:
-   ssh -i .\\{priv_key_name} {final_user}@{device_name}
+[MACOS]
+1. Copy folder to target Mac.
+2. Run:
+   sudo bash ./Deploy-Mac.sh
+
+CLIENT SETUP (Connecting):
+--------------------------
+1. Copy the PRIVATE key ({priv_key_name}) to your machine's ~/.ssh/ folder.
+2. Connect:
+   ssh {current_user}@{device_name}
+   (OR if using a shared admin account: ssh Administrator@{device_name})
 
 UNINSTALL:
 ----------
-To remove OpenSSH and all configurations, run:
-   powershell -ExecutionPolicy Bypass -File .\\Uninstall-OpenSSH.ps1
+Windows: powershell -File .\\Uninstall-OpenSSH.ps1
+Linux:   sudo apt remove openssh-server (or similar)
+MacOS:   sudo systemsetup -setremotelogin off
 """
     with open(os.path.join(staging_dir, "README_INSTALL.txt"), "w") as f:
         f.write(readme_content.strip())
