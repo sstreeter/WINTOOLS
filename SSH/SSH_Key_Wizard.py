@@ -568,11 +568,21 @@ def review_payload(payload_path):
                 
                 print(f"   [{i+1}] {color}{status}{Style.RESET} : {tags}{comment} {Style.DIM}({short_key}){Style.RESET}")
             
-            print(f"\n   Actions: [Number] to toggle, [P]urge Legacy/Unknown, [A]ccept, [C]lear All, [Q]uit")
+            print(f"\n   Actions: [Number/Range] to toggle (e.g. 1-3, 5), [P]urge Legacy, [A]ccept, [C]lear All, [Q]uit")
             choice = get_input("Action", "A").upper()
             
             if choice == 'A':
-                # Save changes (preserving sorted order)
+                # ... (Save block unchanged, but I need to include it if I'm replacing the whole block or just match the context)
+                # Actually I can just target the `else` block if I use the right context.
+                pass # Placeholder for the 'A' block which I am NOT changing in this specific edit if I can avoid it.
+                # Wait, I am replacing the whole loop body or just the input handling?
+                # The prompt has `EndLine: 624`. Let's look at the context again. 
+                # I'll replace the input prompt and the `else` block. 
+                
+            # ... (Putting the real code below) ...
+            
+            if choice == 'A':
+                 # Save changes (preserving sorted order)
                 new_lines = [lines[i] for i in range(len(lines)) if i in keep_indices]
                 with open(payload_path, 'w') as f:
                     for line in new_lines:
@@ -612,14 +622,33 @@ def review_payload(payload_path):
                 break
                 
             else:
+                # Range/List Parser
                 try:
-                    idx = int(choice) - 1
-                    if 0 <= idx < len(lines):
-                        if idx in keep_indices:
-                            keep_indices.remove(idx)
+                    # Normalize: "1..5" -> "1-5", "1, 2" -> "1,2"
+                    cleaned = choice.replace("..", "-").replace(" ", "")
+                    chunks = cleaned.split(",")
+                    
+                    for chunk in chunks:
+                        if "-" in chunk:
+                            # Range: 1-5
+                            start_s, end_s = chunk.split("-", 1)
+                            start = int(start_s) - 1
+                            end = int(end_s) - 1
+                            # Handle reversed range or clamps
+                            if start > end: start, end = end, start
+                            
+                            for idx in range(start, end + 1):
+                                if 0 <= idx < len(lines):
+                                    if idx in keep_indices: keep_indices.remove(idx)
+                                    else: keep_indices.add(idx)
                         else:
-                            keep_indices.add(idx)
-                except: pass
+                            # Single
+                            idx = int(chunk) - 1
+                            if 0 <= idx < len(lines):
+                                if idx in keep_indices: keep_indices.remove(idx)
+                                else: keep_indices.add(idx)
+                except:
+                    pass
                 
     except Exception as e:
         print_error(f"Error reading payload: {e}")
