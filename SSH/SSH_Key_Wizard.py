@@ -597,8 +597,10 @@ def review_payload(payload_path):
                         # Auto-Rescue
                         for idx in removed_current_indices:
                             keep_indices.add(idx)
-                        print(f"   {Style.GREEN}✅ Safety override: Re-enabled current key(s). Saving...{Style.RESET}")
-                        # Fall through to save logic naturally
+                        print(f"   {Style.GREEN}✅ Safety override: Current key(s) retained.{Style.RESET}")
+                        print(f"   {Style.DIM}Returning to list to verify selections...{Style.RESET}")
+                        get_input("Press Enter", allow_empty=True)
+                        continue # Return to list view
                 
                  # Save changes (preserving sorted order)
                 new_lines = [lines[i] for i in range(len(lines)) if i in keep_indices]
