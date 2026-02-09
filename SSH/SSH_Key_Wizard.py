@@ -1154,20 +1154,54 @@ def main():
                     add_choice = get_input(f"Add to '{os.path.basename(payload_path)}'? (yes/no)", "yes")
                     if add_choice.lower() in ['yes', 'y']:
                         with open(pub_path, 'r') as f: pub_content = f.read().strip()
-                        already_present = False
-                        if os.path.exists(payload_path):
-                             with open(payload_path, 'r') as f: 
-                                if pub_content in f.read(): already_present = True
                         
-                        if not already_present:
-                            with open(payload_path, 'a') as f:
-                                f.write(f"\n# Key: {os.path.basename(priv_path)} ({final_user}@{device_name})\n")
-                                f.write(pub_content + "\n")
-                            added = True
-                            print_success("Added to Payload.")
-                        else:
-                            print(f"{Style.YELLOW}⚠️  Already in payload.{Style.RESET}")
-                            added = True
+                        # Smart Append: Check if user@host already exists
+                        import re
+                        new_comment = f"{final_user}@{device_name}"
+                        replaced_count = 0
+                        
+                        if os.path.exists(payload_path):
+                            with open(payload_path, 'r') as f: existing_lines = f.readlines()
+                            
+                            preserved_lines = []
+                            # Logic: If we find a key line with the SAME user@host comment, we skip it (remove it)
+                            # to replace it with the new one.
+                            for line in existing_lines:
+                                line = line.strip()
+                                if not line or line.startswith("#"): 
+                                    preserved_lines.append(line)
+                                    continue
+                                
+                                # Check comment
+                                parts = line.split()
+                                if len(parts) > 2:
+                                    current_comment = parts[-1] 
+                                    # Match user@host portion (ignore date suffix if present)
+                                    # Valid formats: user@host, user@host-2024-01-01
+                                    
+                                    # Extract base user@host
+                                    base_match = re.search(r'^([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+)', current_comment)
+                                    if base_match:
+                                        base_comment = base_match.group(1)
+                                        if base_comment == new_comment:
+                                            replaced_count += 1
+                                            continue # DROP this line (it's old)
+                                
+                                preserved_lines.append(line)
+                            
+                            # Write back purified list
+                            if replaced_count > 0:
+                                with open(payload_path, 'w') as f:
+                                    for l in preserved_lines: f.write(l + "\n")
+                                print(f"{Style.YELLOW}⚠️  Replaced {replaced_count} old key(s) for '{new_comment}'.{Style.RESET}")
+
+                        # Append New
+                        with open(payload_path, 'a') as f:
+                            f.write(f"\n# Key: {os.path.basename(priv_path)} ({final_user}@{device_name})\n")
+                            f.write(pub_content + "\n")
+                        
+                        added = True
+                        print_success("Added to Payload.")
                     
                     print_report_card(priv_path, pub_path, payload_path, added)
                     get_input("Press Enter to return to main menu", allow_empty=True)
