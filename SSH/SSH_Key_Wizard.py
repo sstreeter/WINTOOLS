@@ -58,24 +58,43 @@ def print_header():
     print(f"{Style.DIM}Running on: {platform.system()} ({platform.release()}){Style.RESET}")
     print(f"{Style.BLUE}----------------------------------------{Style.RESET}")
 
-def get_input(prompt, default=None):
+class WizardExit(Exception): pass
+
+def get_input(prompt, default=None, allow_empty=False):
+    prompt_style = f"{Style.BOLD}{prompt}{Style.RESET}"
     if default:
-        # Style prompt?
-        user_input = input(f"{Style.BOLD}{prompt}{Style.RESET} [{default}]: ").strip()
-        return user_input if user_input else default
+        prompt_str = f"{prompt_style} [{default}]"
     else:
-        while True:
-            # Check if default exists to show brackets
-            if default:
-                 prompt_str = f"{Style.BOLD}{prompt}{Style.RESET} [{default}]"
-            else:
-                 prompt_str = f"{Style.BOLD}{prompt}{Style.RESET}"
-            
+        prompt_str = prompt_style
+
+    while True:
+        try:
             user_input = input(f"{prompt_str}: ").strip()
-            if user_input:
-                return user_input
-            elif default:
-                return default
+        except EOFError:
+            # Handle Ctrl+D gracefully
+            raise WizardExit()
+        except KeyboardInterrupt:
+            # Handle Ctrl+C as Cancel
+            print(f"\n{Style.YELLOW}⚠️  Operation Cancelled.{Style.RESET}")
+            raise WizardExit()
+        
+        # Check for cancel command
+        if user_input.lower() in ['cancel', 'exit', 'menu', 'quit']:
+            print(f"\n{Style.YELLOW}⚠️  Operation Cancelled.{Style.RESET}")
+            raise WizardExit()
+
+        if user_input:
+            return user_input
+        
+        if default is not None:
+            return default
+            
+        if allow_empty:
+            return ""
+            
+        # If we get here, input was empty, default was None, and allow_empty was False
+        # Loop continues (implied 'required input')
+
 
 def print_step(title):
     print(f"\n{Style.BOLD}{Style.CYAN}FEATURE:{Style.RESET} {title}")
@@ -502,10 +521,10 @@ def create_portable_wizard(output_dir):
                     print(f"{Style.YELLOW}⚠️  Skipping missing file: {filename}{Style.RESET}")
         
         print_success(f"Portable Wizard Created: {zip_path}")
-        get_input("Press Enter to return to menu")
+        get_input("Press Enter to return to menu", allow_empty=True)
     except Exception as e:
         print_error(f"Failed to create portable zip: {e}")
-        get_input("Press Enter to return to menu")
+        get_input("Press Enter to return to menu", allow_empty=True)
 
 def merge_external_payload(local_payload_path):
     """Merges an external AuthorizedKeysPayload.txt into the local one."""
@@ -520,7 +539,7 @@ def merge_external_payload(local_payload_path):
         
     if not os.path.exists(external_path):
         print_error(f"File not found: {external_path}")
-        get_input("Press Enter to return to menu")
+        get_input("Press Enter to return to menu", allow_empty=True)
         return
 
     try:
@@ -554,22 +573,95 @@ def merge_external_payload(local_payload_path):
     except Exception as e:
         print_error(f"Merge failed: {e}")
     
-    get_input("Press Enter to return to menu")
+    get_input("Press Enter to return to menu", allow_empty=True)
 
 
-def view_history(history_dir):
-    """Displays the contents of the History directory."""
-    print(f"\n{Style.BOLD}📜 History Archive:{Style.RESET}")
-    if not os.path.exists(history_dir) or not os.listdir(history_dir):
-        print(f"   {Style.DIM}(No history found){Style.RESET}")
-        get_input("Press Enter to return to menu")
-        return
+def view_history(history_dir, active_dir):
+    """Displays history and allows restoring a previous state."""
+    while True:
+        clear_screen()
+        print(f"\n{Style.BOLD}📜 History Archive:{Style.RESET}")
+        
+        if not os.path.exists(history_dir) or not os.listdir(history_dir):
+            print(f"   {Style.DIM}(No history found){Style.RESET}")
+            get_input("Press Enter to return to menu", allow_empty=True)
+            return
 
-    archives = sorted(os.listdir(history_dir), reverse=True)
-    for i, name in enumerate(archives):
-        print(f"   {i+1}. {name}")
-    
-    get_input("Press Enter to return to menu")
+        archives = sorted([d for d in os.listdir(history_dir) if os.path.isdir(os.path.join(history_dir, d))], reverse=True)
+        
+        if not archives:
+             print(f"   {Style.DIM}(No valid archive folders found){Style.RESET}")
+             get_input("Press Enter to return to menu", allow_empty=True)
+             return
+
+        for i, name in enumerate(archives):
+            # Calculate size/count? details?
+            item_path = os.path.join(history_dir, name)
+            item_count = len(os.listdir(item_path))
+            print(f"   [{Style.CYAN}{i+1}{Style.RESET}] {name} {Style.DIM}({item_count} files){Style.RESET}")
+        
+        print(f"   [{Style.CYAN}0{Style.RESET}] Back to Main Menu")
+        
+        choice = get_input("\nSelect Archive to Inspect", "0")
+        
+        if choice == '0':
+            return
+            
+        try:
+            idx = int(choice) - 1
+            if 0 <= idx < len(archives):
+                selected_archive = archives[idx]
+                archive_path = os.path.join(history_dir, selected_archive)
+                
+                # Inspect
+                print(f"\n{Style.BOLD}📂 Contents of '{selected_archive}':{Style.RESET}")
+                files = os.listdir(archive_path)
+                for f in files:
+                    print(f"   - {f}")
+                
+                print(f"\n{Style.BOLD}{Style.YELLOW}⚠️  Restore this archive?{Style.RESET}")
+                print(f"   This will {Style.RED}OVERWRITE{Style.RESET} your current 'AuthorizedKeys' folder.")
+                print(f"   (Don't worry, your current state will be auto-archived first.)")
+                
+                restore = get_input("Restore now? (yes/no)", "no")
+                if restore.lower() == 'yes':
+                    # 1. Auto-Archive Current
+                    print(f"\n{Style.DIM}Backing up current state...{Style.RESET}")
+                    # Only archive if there is something to archive
+                    if os.path.exists(active_dir) and os.listdir(active_dir):
+                         archive_current_state(active_dir)
+                    else:
+                         # Ensure we have a clear directory even if it was empty/missing
+                         if os.path.exists(active_dir): shutil.rmtree(active_dir)
+                         os.makedirs(active_dir, exist_ok=True)
+
+                    # 2. Restore
+                    try:
+                        # Copy all files from archive to active_dir
+                        for item in os.listdir(archive_path):
+                            s = os.path.join(archive_path, item)
+                            d = os.path.join(active_dir, item)
+                            if os.path.isdir(s):
+                                shutil.copytree(s, d, dirs_exist_ok=True)
+                            else:
+                                shutil.copy2(s, d)
+                        
+                        print_success(f"Restored '{selected_archive}' to active directory.")
+                        log_action(f"RESTORED: State reset to '{selected_archive}'")
+                        get_input("Press Enter to continue", allow_empty=True)
+                        return # Return to main menu to show new status
+                        
+                    except Exception as e:
+                        print_error(f"Restore failed: {e}")
+                        get_input("Press Enter", allow_empty=True)
+
+            else:
+                print_error("Invalid selection.")
+                get_input("Press Enter", allow_empty=True)
+        except ValueError:
+            print_error("Invalid input.")
+            get_input("Press Enter", allow_empty=True)
+
 
 def main():
     # 1. Initialization
@@ -581,6 +673,7 @@ def main():
     raw_hostname = platform.node().split('.')[0]
     hostname = InputPolicy.sanitize_hostname(raw_hostname)
     hardware_id = get_hardware_id()
+
     
     # Default Identity placeholders
     current_user = "admin" 
@@ -611,190 +704,198 @@ def main():
         print(f"  [{Style.CYAN}7{Style.RESET}] 🎒  Create Portable Wizard (Clean Zip)")
         print(f"  [{Style.CYAN}8{Style.RESET}] 🔗  Merge Another Payload File")
         
-        choice = get_input("\nSelect Option", "1")
+        try:
+            choice = get_input("\nSelect Option")
 
-        if choice == "6":
-            print(f"\n{Style.DIM}Goodbye 👋{Style.RESET}")
-            sys.exit(0)
+            if choice == "6":
+                print(f"\n{Style.DIM}Goodbye 👋{Style.RESET}")
+                sys.exit(0)
 
-        elif choice == "5":
-            archive_current_state(default_dir)
-            get_input("Press Enter to continue")
-            continue
-            
-        elif choice == "7":
-            create_portable_wizard(default_dir)
-            continue
-            
-        elif choice == "8":
-            payload_path = os.path.join(default_dir, "AuthorizedKeysPayload.txt")
-            merge_external_payload(payload_path)
-            continue
-
-        elif choice == "4":
-            view_history(history_dir)
-            continue
-            
-        elif choice == "3":
-            # Create Deployment Package
-            payload_path = os.path.join(default_dir, "AuthorizedKeysPayload.txt")
-            
-            # We need user/device context for the zip name
-            if keys_found and current_device == hardware_id: # Only auto-detect if user hasn't manually set it this session? No, simpler to just re-parse or ask.
-                 try:
-                    parts = keys_found[0].split('_')
-                    if len(parts) >= 4:
-                        current_device = parts[2]
-                        current_user = "_".join(parts[3:]) 
-                 except: pass
-            
-            print(f"\n{Style.BOLD}--- Package Creation ---{Style.RESET}")
-            print(f"Ctx: User={current_user}, Device={current_device}")
-            if get_input("Use this identity for package name? (yes/no)", "yes").lower() != 'yes':
-                 current_user = get_input("Enter Username")
-                 current_device = get_input("Enter Device Name")
-
-            create_deployment_package(default_dir, payload_path, current_user, current_device)
-            get_input("Press Enter to return to menu")
-            continue
-
-        elif choice in ["1", "2"]:
-            # --- Identity Setup (Shared) ---
-            suggestions = get_username_suggestions()
-    
-            print(f"\n{Style.BOLD}Select a standardized username:{Style.RESET}")
-            for i, name in enumerate(suggestions):
-                print(f"  [{Style.CYAN}{i+1}{Style.RESET}] {name}")
-            print(f"  [{Style.CYAN}{len(suggestions)+1}{Style.RESET}] Custom...")
-            
-            user_choice = get_input("Select Option", "1")
-            
-            final_user = ""
-            try:
-                idx = int(user_choice) - 1
-                if 0 <= idx < len(suggestions):
-                    final_user = suggestions[idx]
-                else:
-                    final_user = get_input("Enter Custom Username (a-z0-9._- only)")
-            except:
-                 final_user = get_input("Enter Custom Username (a-z0-9._- only)")
-                 
-            final_user = InputPolicy.sanitize_username(final_user)
-            if len(final_user) < 2:
-                final_user = "admin"
-            print_success(f"Selected Username: {final_user}")
-            # Update loop state
-            current_user = final_user
-
-            # --- Device Setup ---
-            def format_dev_name(base, tag=None):
-                if not tag: return InputPolicy.sanitize_hostname(base)
-                max_base = InputPolicy.MAX_HOSTNAME_LEN - (len(tag) + 1)
-                clean_base = InputPolicy.sanitize_hostname(base)[:max_base].strip('-')
-                return InputPolicy.sanitize_hostname(f"{clean_base}-{tag}")
-
-            dev_suggestions = [
-                format_dev_name(hardware_id),        
-                format_dev_name(hardware_id, "camp"),
-                format_dev_name(hardware_id, "woc"),   # WORK ON CAMPUS
-                format_dev_name(hardware_id, "wfh"), 
-                format_dev_name(hostname, "camp"),   
-                format_dev_name(hostname, "woc"),      # WORK ON CAMPUS (Hostname)
-                format_dev_name(hostname, "wfh"),    
-                format_dev_name(hostname)            
-            ]
-            
-            print(f"\n{Style.BOLD}Select Device Context:{Style.RESET}")
-            seen = set()
-            final_suggestions = []
-            for s in dev_suggestions:
-                if s not in seen:
-                    final_suggestions.append(s)
-                    seen.add(s)
-
-            for i, name in enumerate(final_suggestions):
-                print(f"  [{Style.CYAN}{i+1}{Style.RESET}] {name}")
-            print(f"  [{Style.CYAN}{len(final_suggestions)+1}{Style.RESET}] Custom...")
-            
-            dev_choice = get_input("Select Option", "1")
-            
-            device_name = ""
-            try:
-                idx = int(dev_choice) - 1
-                if 0 <= idx < len(final_suggestions):
-                    device_name = final_suggestions[idx]
-                else:
-                     device_name = get_input("Enter Device Name")
-            except:
-                 device_name = get_input("Enter Device Name")
-            
-            device_name = InputPolicy.sanitize_hostname(device_name)
-            print_success(f"Selected Device: {device_name}")
-            # Update loop state
-            current_device = device_name
-
-            # --- Action ---
-            priv_path = None
-            pub_path = None
-            
-            if choice == "2":
-                # IMPORT
-                print(f"\n{Style.BOLD}--- Import Workflow ---{Style.RESET}")
-                existing_priv = get_input("Path to your existing PRIVATE key").strip()
-                existing_priv = existing_priv.replace('"', '').replace("'", "")
+            elif choice == "5":
+                archive_current_state(default_dir)
+                get_input("Press Enter to continue", allow_empty=True)
+                continue
                 
-                if os.path.exists(existing_priv):
-                    key_name = f"id_ed25519_{device_name}_{final_user}"
-                    new_priv_path = os.path.join(default_dir, key_name)
-                    new_pub_path = f"{new_priv_path}.pub"
-                    
-                    try:
-                        cmd = ["ssh-keygen", "-y", "-f", existing_priv]
-                        pub_content = subprocess.check_output(cmd).decode().strip()
-                        comment = f"{final_user}@{device_name}-{datetime.date.today()}"
-                        pub_content_with_comment = f"{pub_content} {comment}"
-                        
-                        with open(new_pub_path, "w") as f:
-                            f.write(pub_content_with_comment + "\n")
-                        shutil.copy2(existing_priv, new_priv_path)
-                        if os.name != 'nt': os.chmod(new_priv_path, 0o600)
-                        
-                        print_success(f"Imported: {key_name}")
-                        log_action(f"IMPORTED: {key_name}")
-                        priv_path, pub_path = new_priv_path, new_pub_path
-                    except Exception as e:
-                        print_error(f"Import failed: {e}")
-                else:
-                    print_error("File not found.")
-            else:
-                # GENERATE
-                priv_path, pub_path = generate_key(final_user, device_name, default_dir)
-
-            if priv_path and pub_path:
-                # Add to Payload
+            elif choice == "7":
+                create_portable_wizard(default_dir)
+                continue
+                
+            elif choice == "8":
                 payload_path = os.path.join(default_dir, "AuthorizedKeysPayload.txt")
-                added = False
+                merge_external_payload(payload_path)
+                continue
+
+            elif choice == "4":
+                view_history(history_dir, default_dir)
+                continue
                 
-                print("\n" + f"{Style.BLUE}-{Style.RESET}" * 40)
-                add_choice = get_input(f"Add to '{os.path.basename(payload_path)}'? (yes/no)", "yes")
-                if add_choice.lower() in ['yes', 'y']:
-                    with open(pub_path, 'r') as f: pub_content = f.read().strip()
-                    already_present = False
-                    if os.path.exists(payload_path):
-                         with open(payload_path, 'r') as f: 
-                            if pub_content in f.read(): already_present = True
-                    
-                    if not already_present:
-                        with open(payload_path, 'a') as f:
-                            f.write(f"\n# Key: {os.path.basename(priv_path)} ({final_user}@{device_name})\n")
-                            f.write(pub_content + "\n")
-                        added = True
-                        print_success("Added to Payload.")
+            elif choice == "3":
+                # Create Deployment Package
+                payload_path = os.path.join(default_dir, "AuthorizedKeysPayload.txt")
+                
+                # We need user/device context for the zip name
+                if keys_found and current_device == hardware_id: 
+                     try:
+                        parts = keys_found[0].split('_')
+                        if len(parts) >= 4:
+                            current_device = parts[2]
+                            current_user = "_".join(parts[3:]) 
+                     except: pass
+                
+                print(f"\n{Style.BOLD}--- Package Creation ---{Style.RESET}")
+                print(f"Ctx: User={current_user}, Device={current_device}")
+                if get_input("Use this identity for package name? (yes/no)", "yes").lower() != 'yes':
+                     current_user = get_input("Enter Username")
+                     current_device = get_input("Enter Device Name")
+
+                create_deployment_package(default_dir, payload_path, current_user, current_device)
+                get_input("Press Enter to return to menu", allow_empty=True)
+                continue
+
+            elif choice in ["1", "2"]:
+                # --- Identity Setup (Shared) ---
+                suggestions = get_username_suggestions()
+        
+                print(f"\n{Style.BOLD}Select a standardized username:{Style.RESET}")
+                for i, name in enumerate(suggestions):
+                    print(f"  [{Style.CYAN}{i+1}{Style.RESET}] {name}")
+                print(f"  [{Style.CYAN}{len(suggestions)+1}{Style.RESET}] Custom...")
+                
+                user_choice = get_input("Select Option", "1")
+                
+                final_user = ""
+                try:
+                    idx = int(user_choice) - 1
+                    if 0 <= idx < len(suggestions):
+                        final_user = suggestions[idx]
                     else:
-                        print(f"{Style.YELLOW}⚠️  Already in payload.{Style.RESET}")
-                        added = True
+                        final_user = get_input("Enter Custom Username (a-z0-9._- only)")
+                except:
+                     final_user = get_input("Enter Custom Username (a-z0-9._- only)")
+                     
+                final_user = InputPolicy.sanitize_username(final_user)
+                if len(final_user) < 2:
+                    final_user = "admin"
+                print_success(f"Selected Username: {final_user}")
+                # Update loop state
+                current_user = final_user
+
+                # --- Device Setup ---
+                def format_dev_name(base, tag=None):
+                    if not tag: return InputPolicy.sanitize_hostname(base)
+                    max_base = InputPolicy.MAX_HOSTNAME_LEN - (len(tag) + 1)
+                    clean_base = InputPolicy.sanitize_hostname(base)[:max_base].strip('-')
+                    return InputPolicy.sanitize_hostname(f"{clean_base}-{tag}")
+
+                dev_suggestions = [
+                    format_dev_name(hardware_id),        
+                    format_dev_name(hardware_id, "camp"),
+                    format_dev_name(hardware_id, "woc"),   # WORK ON CAMPUS
+                    format_dev_name(hardware_id, "wfh"), 
+                    format_dev_name(hostname, "camp"),   
+                    format_dev_name(hostname, "woc"),      # WORK ON CAMPUS (Hostname)
+                    format_dev_name(hostname, "wfh"),    
+                    format_dev_name(hostname)            
+                ]
                 
-                print_report_card(priv_path, pub_path, payload_path, added)
-                get_input("Press Enter to return to main menu")
+                print(f"\n{Style.BOLD}Select Device Context:{Style.RESET}")
+                seen = set()
+                final_suggestions = []
+                for s in dev_suggestions:
+                    if s not in seen:
+                        final_suggestions.append(s)
+                        seen.add(s)
+
+                for i, name in enumerate(final_suggestions):
+                    print(f"  [{Style.CYAN}{i+1}{Style.RESET}] {name}")
+                print(f"  [{Style.CYAN}{len(final_suggestions)+1}{Style.RESET}] Custom...")
+                
+                dev_choice = get_input("Select Option", "1")
+                
+                device_name = ""
+                try:
+                    idx = int(dev_choice) - 1
+                    if 0 <= idx < len(final_suggestions):
+                        device_name = final_suggestions[idx]
+                    else:
+                         device_name = get_input("Enter Device Name")
+                except:
+                     device_name = get_input("Enter Device Name")
+                
+                device_name = InputPolicy.sanitize_hostname(device_name)
+                print_success(f"Selected Device: {device_name}")
+                # Update loop state
+                current_device = device_name
+
+                # --- Action ---
+                priv_path = None
+                pub_path = None
+                
+                if choice == "2":
+                    # IMPORT
+                    print(f"\n{Style.BOLD}--- Import Workflow ---{Style.RESET}")
+                    existing_priv = get_input("Path to your existing PRIVATE key").strip()
+                    existing_priv = existing_priv.replace('"', '').replace("'", "")
+                    
+                    if os.path.exists(existing_priv):
+                        key_name = f"id_ed25519_{device_name}_{final_user}"
+                        new_priv_path = os.path.join(default_dir, key_name)
+                        new_pub_path = f"{new_priv_path}.pub"
+                        
+                        try:
+                            cmd = ["ssh-keygen", "-y", "-f", existing_priv]
+                            pub_content = subprocess.check_output(cmd).decode().strip()
+                            comment = f"{final_user}@{device_name}-{datetime.date.today()}"
+                            pub_content_with_comment = f"{pub_content} {comment}"
+                            
+                            with open(new_pub_path, "w") as f:
+                                f.write(pub_content_with_comment + "\n")
+                            shutil.copy2(existing_priv, new_priv_path)
+                            if os.name != 'nt': os.chmod(new_priv_path, 0o600)
+                            
+                            print_success(f"Imported: {key_name}")
+                            log_action(f"IMPORTED: {key_name}")
+                            priv_path, pub_path = new_priv_path, new_pub_path
+                        except Exception as e:
+                            print_error(f"Import failed: {e}")
+                    else:
+                        print_error("File not found.")
+                else:
+                    # GENERATE
+                    priv_path, pub_path = generate_key(final_user, device_name, default_dir)
+
+                if priv_path and pub_path:
+                    # Add to Payload
+                    payload_path = os.path.join(default_dir, "AuthorizedKeysPayload.txt")
+                    added = False
+                    
+                    print("\n" + f"{Style.BLUE}-{Style.RESET}" * 40)
+                    add_choice = get_input(f"Add to '{os.path.basename(payload_path)}'? (yes/no)", "yes")
+                    if add_choice.lower() in ['yes', 'y']:
+                        with open(pub_path, 'r') as f: pub_content = f.read().strip()
+                        already_present = False
+                        if os.path.exists(payload_path):
+                             with open(payload_path, 'r') as f: 
+                                if pub_content in f.read(): already_present = True
+                        
+                        if not already_present:
+                            with open(payload_path, 'a') as f:
+                                f.write(f"\n# Key: {os.path.basename(priv_path)} ({final_user}@{device_name})\n")
+                                f.write(pub_content + "\n")
+                            added = True
+                            print_success("Added to Payload.")
+                        else:
+                            print(f"{Style.YELLOW}⚠️  Already in payload.{Style.RESET}")
+                            added = True
+                    
+                    print_report_card(priv_path, pub_path, payload_path, added)
+                    get_input("Press Enter to return to main menu", allow_empty=True)
+                    
+        except WizardExit:
+             # Just loop back to main menu
+             continue
 
 
+
+if __name__ == "__main__":
+    main()
