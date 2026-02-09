@@ -1193,22 +1193,49 @@ def main():
                 current_user = final_user
 
                 # --- Device Setup ---
+                # --- Device Setup ---
+                def get_clean_hostname():
+                    """
+                    Gets a human-meaningful hostname (e.g. 'Spencer-MBP').
+                    On Mac, platform.node() is often 'uuid.local', so we prefer scutil.
+                    """
+                    clean_host = InputPolicy.sanitize_hostname(platform.node().split('.')[0])
+                    
+                    if platform.system() == "Darwin":
+                        try:
+                            # Try to get ComputerName (e.g. "Spencer's MacBook Pro")
+                            cname = subprocess.check_output("scutil --get ComputerName", shell=True).decode().strip()
+                            if cname:
+                                clean_host = InputPolicy.sanitize_hostname(cname)
+                        except: pass
+                    
+                    return clean_host
+
+                clean_hostname = get_clean_hostname()
+
                 def format_dev_name(base, tag=None):
                     if not tag: return InputPolicy.sanitize_hostname(base)
                     max_base = InputPolicy.MAX_HOSTNAME_LEN - (len(tag) + 1)
                     clean_base = InputPolicy.sanitize_hostname(base)[:max_base].strip('-')
                     return InputPolicy.sanitize_hostname(f"{clean_base}-{tag}")
 
-                dev_suggestions = [
-                    format_dev_name(hardware_id),        
-                    format_dev_name(hardware_id, "camp"),
-                    format_dev_name(hardware_id, "woc"),   # WORK ON CAMPUS
-                    format_dev_name(hardware_id, "wfh"), 
-                    format_dev_name(hostname, "camp"),   
-                    format_dev_name(hostname, "woc"),      # WORK ON CAMPUS (Hostname)
-                    format_dev_name(hostname, "wfh"),    
-                    format_dev_name(hostname)            
-                ]
+                # Suggestion Logic:
+                # 1. Hardware ID (concise, good default) -> mba2023
+                # 2. Hostname (if different and meaningful) -> spencersmacbookpro
+                # 3. Suffixes: cmp (campus), wfh (home)
+                
+                dev_suggestions = []
+                
+                # Hardware variations
+                dev_suggestions.append(format_dev_name(hardware_id))        
+                dev_suggestions.append(format_dev_name(hardware_id, "cmp"))
+                dev_suggestions.append(format_dev_name(hardware_id, "wfh"))
+
+                # Hostname variations (only if hostname is distinct from hardware_id)
+                if clean_hostname != hardware_id and clean_hostname != "unknown-device":
+                     dev_suggestions.append(format_dev_name(clean_hostname))
+                     dev_suggestions.append(format_dev_name(clean_hostname, "cmp"))
+                     dev_suggestions.append(format_dev_name(clean_hostname, "wfh"))
                 
                 print(f"\n{Style.BOLD}Select Device Context:{Style.RESET}")
                 seen = set()
