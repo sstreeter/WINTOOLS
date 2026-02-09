@@ -36,6 +36,23 @@ You must have the **Private Key** on the computer you are connecting *from*.
 > [!IMPORTANT]
 > On Mac/Linux, you must secure the key permissions: `chmod 600 ~/.ssh/id_ed25519`
 
+#### Managing Multiple Keys (Best Practice)
+If you have multiple keys (e.g., `id_ed25519_work`, `id_ed25519_personal`), do **not** rename them. instead, create a `~/.ssh/config` file:
+
+```text
+# ~/.ssh/config
+Host work-server
+    HostName 192.168.1.50
+    User admin
+    IdentityFile ~/.ssh/id_ed25519_work
+
+Host home-pc
+    HostName 10.0.0.5
+    User spencer
+    IdentityFile ~/.ssh/id_ed25519_personal
+```
+Now you can just type: `ssh work-server`
+
 ### Step 3: Deploy
 
 
