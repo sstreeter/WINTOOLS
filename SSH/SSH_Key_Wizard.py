@@ -469,37 +469,63 @@ def review_payload(payload_path):
             print(f"   {Style.DIM}(Payload is empty){Style.RESET}")
             return
 
-        # Simple parser to extract comments for display
+        # Sort by Date (Newest First)
+        # Key format: ... user@host-YYYY-MM-DD
+        import re
+        def get_date_key(line):
+            try:
+                parts = line.split()
+                if len(parts) > 2:
+                    comment = parts[-1]
+                    # Find YYYY-MM-DD
+                    match = re.search(r'(\d{4}-\d{2}-\d{2})', comment)
+                    if match:
+                        return match.group(1)
+            except: pass
+            return "0000-00-00"
+
+        # Sort descending (Newest date at top)
+        lines.sort(key=get_date_key, reverse=True)
+
         print(f"   Found {len(lines)} authorized key(s).")
         print(f"   {Style.YELLOW}Review carefully. Remove keys that are no longer needed.{Style.RESET}")
         
         keep_indices = set(range(len(lines)))
         
         while True:
-            print(f"\n   {Style.BOLD}Current Payload:{Style.RESET}")
+            print(f"\n   {Style.BOLD}Current Payload (Sorted Newest-to-Oldest):{Style.RESET}")
             for i, line in enumerate(lines):
-                # Extract comment (last field)
                 parts = line.split()
                 comment = parts[-1] if len(parts) > 2 else "(no comment)"
-                short_key = parts[1][:20] + "..." if len(parts) > 1 else "..."
+                short_key = parts[1][:15] + "..." if len(parts) > 1 else "..."
                 
                 status = "✅ KEEP" if i in keep_indices else "❌ REMOVE"
                 color = Style.GREEN if i in keep_indices else Style.RED
                 
-                print(f"   [{i+1}] {color}{status}{Style.RESET} : {comment} {Style.DIM}({short_key}){Style.RESET}")
+                # Highlight date if present
+                date_str = ""
+                date_match = re.search(r'(\d{4}-\d{2}-\d{2})', comment)
+                if date_match:
+                    date_str = f"{Style.CYAN}[{date_match.group(1)}]{Style.RESET} "
+                
+                print(f"   [{i+1}] {color}{status}{Style.RESET} : {date_str}{comment} {Style.DIM}({short_key}){Style.RESET}")
             
             print(f"\n   Actions: [Number] to toggle, [A]ccept, [C]lear All, [Q]uit (No Change)")
             choice = get_input("Action", "A").upper()
             
             if choice == 'A':
-                # Save changes
-                new_lines = [lines[i] for i in sorted(keep_indices)]
+                # Save changes (preserving sorted order)
+                new_lines = [lines[i] for i in range(len(lines)) if i in keep_indices]
                 with open(payload_path, 'w') as f:
                     for line in new_lines:
                         f.write(line + "\n")
-                if len(keep_indices) < len(lines):
-                    print_success(f"Updated payload. Removed {len(lines) - len(keep_indices)} key(s).")
-                    log_action(f"PAYLOAD PRUNED: Removed {len(lines) - len(keep_indices)} keys.")
+                
+                removed_count = len(lines) - len(new_lines)
+                if removed_count > 0:
+                    print_success(f"Updated payload. Removed {removed_count} key(s).")
+                    log_action(f"PAYLOAD PRUNED: Removed {removed_count} keys.")
+                elif len(new_lines) == len(lines):
+                     print("   Payload re-saved (sorted).")
                 break
                 
             elif choice == 'C':
