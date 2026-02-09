@@ -418,6 +418,9 @@ def install_key_menu(default_dir):
     except Exception as e:
         print_error(f"Installation failed: {e}")
         get_input("Press Enter", allow_empty=True)
+
+def get_username_suggestions():
+    """Get list of potential usernames based on system info."""
     suggestions = []
     
     # 1. System Username
