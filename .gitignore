@@ -23,6 +23,7 @@ desktop.ini
 SSH/AuthorizedKeys/
 SSH/History/
 SSH/AuthorizedKeysPayload.txt
+SSH/wizard_audit.log
 *.pem
 *.key
 *.pub

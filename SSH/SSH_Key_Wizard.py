@@ -21,6 +21,22 @@ import argparse
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
 
+# --- Logging ---
+def log_action(message, level="INFO"):
+    """Appends a timestamped entry to the wizard_audit.log file."""
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_entry = f"[{timestamp}] [{level}] {message}\n"
+    
+    # Log file resides in the same folder as the script
+    log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wizard_audit.log")
+    
+    try:
+        with open(log_path, "a") as f:
+            f.write(log_entry)
+    except Exception as e:
+        # Fallback to stderr if log writing fails
+        print(f"{Style.RED}Error writing to log: {e}{Style.RESET}", file=sys.stderr)
+
 # --- UI Helpers ---
 class Style:
     RESET = "\033[0m"
@@ -158,6 +174,7 @@ def generate_key(user, target_platform, output_dir, interactive=True):
     try:
         subprocess.run(cmd, check=True) # stdout/stderr allowed for q
         print_success(f"Key Generated: {key_name}")
+        log_action(f"GENERATED NEW KEY: {key_name} (User: {user}, Device: {target_platform}) | Path: {key_path}")
         return key_path, pub_key_path
     except subprocess.CalledProcessError as e:
         print_error(f"Error generating key: {e}")
@@ -190,6 +207,7 @@ def archive_current_state(output_dir):
     try:
         shutil.move(output_dir, archive_path)
         print_success(f"State Archived. Starting fresh.")
+        log_action(f"RESET/ARCHIVE: Current state moved to History/{archive_name}", "WARN")
         # Re-create empty directory for immediate use
         os.makedirs(output_dir, exist_ok=True)
     except Exception as e:
@@ -499,6 +517,7 @@ def main():
                 os.chmod(new_priv_path, 0o600)
 
             print_success(f"Key Imported and Standardized: {key_name}")
+            log_action(f"IMPORTED EXISTING KEY: {key_name} (User: {final_user}, Device: {device_name}) | Source: {existing_priv}")
             priv_path, pub_path = new_priv_path, new_pub_path
 
         except subprocess.CalledProcessError:
