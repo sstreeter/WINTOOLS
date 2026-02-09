@@ -32,7 +32,8 @@ param (
     [string[]]$AdminKeys = @(),
     [string]$KeysFile,
     [int]$SSHPort = 22,
-    [bool]$DisablePasswordAuth = $false
+    [bool]$DisablePasswordAuth = $false,
+    [switch]$Silent
 )
 
 # --- Logging Setup ---
@@ -41,7 +42,13 @@ if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Forc
 $LogFile = Join-Path $LogDir "Deploy-OpenSSH.log"
 Start-Transcript -Path $LogFile -Append
 
-Write-Output "--- Starting OpenSSH Deployment: $(Get-Date) ---"
+# Suppress output if silent
+if ($Silent) {
+    # Redirect output to null but keep transcript logging if desired
+    # For now, we just skip the initial greeting
+} else {
+    Write-Output "--- Starting OpenSSH Deployment: $(Get-Date) ---"
+}
 
 # --- Administrator Check ---
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {

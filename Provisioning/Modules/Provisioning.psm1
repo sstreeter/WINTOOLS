@@ -425,18 +425,20 @@ function Rename-LocalComputerInternal {
 function Configure-RemoteDesktopInternal {
     param([bool]$Enable)
     try {
-        $val = if ($Enable) { 0 } else { 1 }
-        Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value $val -Force
         if ($Enable) {
-            Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
-            Set-Service -Name "TermService" -StartupType Automatic
-            Start-Service -Name "TermService" -ErrorAction SilentlyContinue
+            Write-ProvisioningLog "Delegating RDP setup to RemotePC module..." "INFO"
+            $RemotePCScript = Join-Path $PSScriptRoot "..\..\RemotePC\Enable-RemotePC.ps1"
+            & $RemotePCScript -Mode "Consent" -Silent
         } else {
+            # Basic fallback for disabling if no dedicated script exists
+            Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 1 -Force
             Disable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
-            Set-Service -Name "TermService" -StartupType Disabled
         }
         return $true
-    } catch { return $false }
+    } catch { 
+        Write-ProvisioningLog "RemotePC delegation failed: $($_.Exception.Message)" "ERROR"
+        return $false 
+    }
 }
 
 function Configure-PowerSettingsAlwaysOnInternal {
@@ -456,15 +458,19 @@ function Configure-OpenSshServerInternal {
     param([bool]$Enable)
     try {
         if ($Enable) {
-            Set-Service -Name "sshd" -StartupType Automatic
-            Start-Service -Name "sshd" -ErrorAction SilentlyContinue
-            Enable-NetFirewallRule -DisplayName "OpenSSH SSH Server (sshd)" -ErrorAction SilentlyContinue
+            Write-ProvisioningLog "Delegating SSH setup to SSH module..." "INFO"
+            $SSHScript = Join-Path $PSScriptRoot "..\..\SSH\Deploy-OpenSSH.ps1"
+            & $SSHScript -Silent
         } else {
+            # Basic fallback for disabling
             Stop-Service -Name "sshd" -ErrorAction SilentlyContinue
             Set-Service -Name "sshd" -StartupType Disabled
         }
         return $true
-    } catch { return $false }
+    } catch { 
+        Write-ProvisioningLog "SSH delegation failed: $($_.Exception.Message)" "ERROR"
+        return $false 
+    }
 }
 
 function Perform-WindowsActivationInternal {

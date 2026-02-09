@@ -30,6 +30,10 @@ A tool for managing and displaying USB device information on Windows.
 *   **Scripts**: `winusb.py`.
 
 ---
+## 🏗️ Architecture: Master Orchestrator
+**WINTOOLS** uses a modular delegation pattern. The **[Provisioning](Provisioning/)** module acts as the central director for new workstation setups, delegating specialized tasks (like SSH and Remote Desktop hardening) to the standalone module scripts. This ensures a single source of truth for all security configurations.
+
+---
 ## 👤 Project Lead & Attribution
 **WINTOOLS** is developed and maintained by **Spencer Streeter**.
 

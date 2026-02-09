@@ -20,7 +20,9 @@
 
 param (
     [ValidateSet("Consent", "NoConsent", "ViewOnly", "ViewNoConsent")]
-    [string]$Mode = "Consent"
+    [string]$Mode = "Consent",
+
+    [switch]$Silent
 )
 
 # --- Administrator Check ---
@@ -87,4 +89,11 @@ Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyConti
 # So File/Printer Sharing (SMB) might also be needed for initial enumeration.
 Enable-NetFirewallRule -DisplayGroup "File and Printer Sharing" -ErrorAction SilentlyContinue
 
-Write-Output "Configuration Complete. Shadowing is ready."
+# Result Output
+if (-not $Silent) {
+    Write-Output "Configuration Complete. Shadowing is ready."
+}
+else {
+    # Exit code for automation
+    Exit 0
+}
