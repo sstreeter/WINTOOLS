@@ -564,7 +564,22 @@ def review_payload(payload_path):
                 # Highlight date if present
                 date_match = re.search(r'(\d{4}-\d{2}-\d{2})', comment)
                 if date_match and not is_current: # Don't double highlight current
-                    tags += f"{Style.DIM}[{date_match.group(1)}]{Style.RESET} "
+                    d_str = date_match.group(1)
+                    rel_tag = ""
+                    try:
+                        key_date = datetime.datetime.strptime(d_str, "%Y-%m-%d").date()
+                        today = datetime.date.today()
+                        delta = (today - key_date).days
+                        
+                        if delta < 0: rel_tag = " (Future)"
+                        elif delta == 0: rel_tag = " (Today)"
+                        elif delta == 1: rel_tag = " (Yesterday)"
+                        elif delta < 30: rel_tag = f" ({delta} days ago)"
+                        elif delta < 365: rel_tag = f" ({delta//30} months ago)"
+                        else: rel_tag = f" ({delta//365} years ago)"
+                    except: pass
+                    
+                    tags += f"{Style.DIM}[{d_str}{rel_tag}]{Style.RESET} "
                 
                 print(f"   [{i+1}] {color}{status}{Style.RESET} : {tags}{comment} {Style.DIM}({short_key}){Style.RESET}")
             
