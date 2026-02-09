@@ -374,199 +374,427 @@ def get_hardware_id():
     # Strict Sanitization via Policy
     return InputPolicy.sanitize_hostname(hardware_id)
 
-def main():
-    print_header()
-    
-    print(f"  [{Style.CYAN}1{Style.RESET}] Generate NEW Ed25519 Key Pair (Recommended)")
-    print(f"  [{Style.CYAN}2{Style.RESET}] Import EXISTING Private Key")
-    print(f"  [{Style.CYAN}3{Style.RESET}] RESET and Archive Current State")
-    
-    wiz_mode = get_input("Select Option", "1")
 
-    # 1. Output Directory (Initialize first for Archive access)
-    default_dir = os.path.join(os.getcwd(), "AuthorizedKeys")
+    # ... (existing code) ...
+
+def create_deployment_package(output_dir, payload_path, final_user, device_name):
+    """Creates a zipped deployment package with scripts and instructions."""
+    import zipfile
     
-    if wiz_mode == "3":
-        archive_current_state(default_dir)
-        # Restart main after reset
-        main()
+    print(f"\n{Style.BOLD}Deployment Package:{Style.RESET}")
+    create_pkg = get_input(f"Create a 'Deploy-Package.zip' for manual transfer? (yes/no)", "yes")
+    
+    if create_pkg.lower() not in ['yes', 'y']:
         return
-    output_dir = get_input("Output Directory", default_dir)
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # 2. Identity Setup (Username & Device) – Common to both modes
-    suggestions = get_username_suggestions()
-    
-    print(f"\n{Style.BOLD}Select a standardized username:{Style.RESET}")
-    for i, name in enumerate(suggestions):
-        print(f"  [{Style.CYAN}{i+1}{Style.RESET}] {name}")
-    print(f"  [{Style.CYAN}{len(suggestions)+1}{Style.RESET}] Custom...")
-    
-    choice = get_input("Select Option", "1")
-    
-    final_user = ""
-    try:
-        idx = int(choice) - 1
-        if 0 <= idx < len(suggestions):
-            final_user = suggestions[idx]
-        else:
-            final_user = get_input("Enter Custom Username (a-z0-9._- only)")
-    except:
-         final_user = get_input("Enter Custom Username (a-z0-9._- only)")
-         
-    # Validate via Policy
-    final_user = InputPolicy.sanitize_username(final_user)
-    if len(final_user) < 2:
-        print_error("Username too short. Defaulting to 'admin'.")
-        final_user = "admin"
-        
-    print_success(f"Selected Username: {final_user}")
 
-    # 3. Source Device Name (Smart Hardware ID)
+    # 1. Prepare Staging Area
+    staging_dir = os.path.join(output_dir, "Deploy_Package_Staging")
+    if os.path.exists(staging_dir):
+        shutil.rmtree(staging_dir)
+    os.makedirs(staging_dir)
+    
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # 2. Copy Scripts
+    files_to_copy = {
+        "Deploy-OpenSSH.ps1": "Deploy-OpenSSH.ps1",
+        "Uninstall-OpenSSH.ps1": "Uninstall-OpenSSH.ps1",
+    }
+    
+    payload_name = os.path.basename(payload_path)
+    
+    # Copy Payload (if it exists)
+    if os.path.exists(payload_path):
+        shutil.copy2(payload_path, os.path.join(staging_dir, payload_name))
+    else:
+        print(f"{Style.YELLOW}⚠️  Warning: Payload file '{payload_name}' not found. Skipping.{Style.RESET}")
+
+    # Copy Scripts
+    for filename, dest_name in files_to_copy.items():
+        src = os.path.join(script_dir, filename)
+        if os.path.exists(src):
+            shutil.copy2(src, os.path.join(staging_dir, dest_name))
+        else:
+            print(f"{Style.RED}❌ Error: Script '{filename}' not found in '{script_dir}'.{Style.RESET}")
+
+    # 3. Create README.txt
+    readme_content = f"""
+WINTOOLS: SSH Deployment Package
+================================
+Generated: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+Target Device: {device_name} (User: {final_user})
+
+INSTRUCTIONS:
+-------------
+1. Copy this entire folder (or unzip it) to the target Windows machine.
+2. Open PowerShell as Administrator.
+3. Run the following command to install OpenSSH and configure the keys:
+
+   powershell -ExecutionPolicy Bypass -File .\\Deploy-OpenSSH.ps1 -KeysFile .\\{payload_name} -DisablePasswordAuth $true
+
+4. To test, try SSHing into this machine from your admin station:
+   ssh {final_user}@{device_name}
+
+UNINSTALL:
+----------
+To remove OpenSSH and all configurations, run:
+   powershell -ExecutionPolicy Bypass -File .\\Uninstall-OpenSSH.ps1
+"""
+    with open(os.path.join(staging_dir, "README_INSTALL.txt"), "w") as f:
+        f.write(readme_content.strip())
+
+    # 4. Zip It
+    zip_name = f"Deploy-Package-{device_name}.zip"
+    zip_path = os.path.join(output_dir, zip_name)
+    
+    try:
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for root, dirs, files in os.walk(staging_dir):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.relpath(file_path, staging_dir)
+                    zipf.write(file_path, arcname)
+        
+        print_success(f"Package Created: {zip_path}")
+        print(f"   {Style.DIM}Contains: Scripts, Payload, and Instructions.{Style.RESET}")
+        
+    except Exception as e:
+        print_error(f"Failed to create zip package: {e}")
+    finally:
+        # Cleanup Staging
+        shutil.rmtree(staging_dir)
+
+    return zip_path
+
+
+def create_portable_wizard(output_dir):
+    """Creates a clean zip of the wizard and scripts for portability."""
+    import zipfile
+    
+    print(f"\n{Style.BOLD}🎒 Create Portable Wizard:{Style.RESET}")
+    print("This will create a 'WINTOOLS_SSH_Wizard_Portable.zip' containing only the scripts.")
+    print("It will NOT include your secrets, history, or logs.")
+    
+    confirm = get_input("Proceed? (yes/no)", "yes")
+    if confirm.lower() != 'yes': return
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    zip_name = "WINTOOLS_SSH_Wizard_Portable.zip"
+    zip_path = os.path.join(output_dir, zip_name)
+    
+    # Allowlist of files to include
+    include_files = [
+        "SSH_Key_Wizard.py",
+        "Deploy-OpenSSH.ps1",
+        "Uninstall-OpenSSH.ps1",
+        "Toggle-SSH.ps1",
+        "README.md",
+        "LICENSE"
+    ]
+    
+    try:
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for filename in include_files:
+                src = os.path.join(script_dir, filename)
+                if os.path.exists(src):
+                    zipf.write(src, filename)
+                else:
+                    print(f"{Style.YELLOW}⚠️  Skipping missing file: {filename}{Style.RESET}")
+        
+        print_success(f"Portable Wizard Created: {zip_path}")
+        get_input("Press Enter to return to menu")
+    except Exception as e:
+        print_error(f"Failed to create portable zip: {e}")
+        get_input("Press Enter to return to menu")
+
+def merge_external_payload(local_payload_path):
+    """Merges an external AuthorizedKeysPayload.txt into the local one."""
+    print(f"\n{Style.BOLD}🔗 Merge External Payload:{Style.RESET}")
+    
+    external_path = get_input("Path to external 'AuthorizedKeysPayload.txt' (or folder containing it)").strip()
+    external_path = external_path.replace('"', '').replace("'", "")
+    
+    # Auto-resolve if folder provided
+    if os.path.isdir(external_path):
+        external_path = os.path.join(external_path, "AuthorizedKeysPayload.txt")
+        
+    if not os.path.exists(external_path):
+        print_error(f"File not found: {external_path}")
+        get_input("Press Enter to return to menu")
+        return
+
+    try:
+        # Read Local
+        local_content = ""
+        if os.path.exists(local_payload_path):
+            with open(local_payload_path, 'r') as f: local_content = f.read()
+        
+        # Read External
+        with open(external_path, 'r') as f: external_content = f.read()
+        
+        # Parse and Merge (Simple Line-based deduplication for now)
+        # A more robust way would be to parse key string, but line-based is usually sufficient for ssh-keys
+        local_lines = set(line.strip() for line in local_content.splitlines() if line.strip())
+        external_lines = [line.strip() for line in external_content.splitlines() if line.strip()]
+        
+        added_count = 0
+        with open(local_payload_path, 'a') as f:
+            if local_content and not local_content.endswith('\n'):
+                f.write("\n")
+            
+            for line in external_lines:
+                if line not in local_lines:
+                    f.write(line + "\n")
+                    local_lines.add(line) # Add to set to prevent dupes within the same import
+                    added_count += 1
+        
+        print_success(f"Merged! Added {added_count} new line(s) to '{os.path.basename(local_payload_path)}'.")
+        log_action(f"MERGED PAYLOAD: Added {added_count} lines from {external_path}")
+        
+    except Exception as e:
+        print_error(f"Merge failed: {e}")
+    
+    get_input("Press Enter to return to menu")
+
+
+def view_history(history_dir):
+    """Displays the contents of the History directory."""
+    print(f"\n{Style.BOLD}📜 History Archive:{Style.RESET}")
+    if not os.path.exists(history_dir) or not os.listdir(history_dir):
+        print(f"   {Style.DIM}(No history found){Style.RESET}")
+        get_input("Press Enter to return to menu")
+        return
+
+    archives = sorted(os.listdir(history_dir), reverse=True)
+    for i, name in enumerate(archives):
+        print(f"   {i+1}. {name}")
+    
+    get_input("Press Enter to return to menu")
+
+def main():
+    # 1. Initialization
+    default_dir = os.path.join(os.getcwd(), "AuthorizedKeys")
+    history_dir = os.path.join(os.getcwd(), "History")
+    os.makedirs(default_dir, exist_ok=True)
+    
+    # Pre-calculate Identity once (or could be re-calc'd if needed)
     raw_hostname = platform.node().split('.')[0]
     hostname = InputPolicy.sanitize_hostname(raw_hostname)
     hardware_id = get_hardware_id()
     
-    def format_dev_name(base, tag=None):
-        if not tag:
-            return InputPolicy.sanitize_hostname(base)
+    # Default Identity placeholders
+    current_user = "admin" 
+    current_device = hardware_id
+
+    while True:
+        clear_screen()
+        print(f"{Style.BLUE}========================================{Style.RESET}")
+        print(f"{Style.BOLD}      WINTOOLS: SSH Key Wizard 🧙‍♂️      {Style.RESET}")
+        print(f"{Style.BLUE}========================================{Style.RESET}")
+        print(f"{Style.DIM}Running on: {platform.system()} ({platform.release()}){Style.RESET}")
         
-        # If adding a tag, we might need to truncate the base to fit in 15 chars
-        # Format: base-tag
-        max_base = InputPolicy.MAX_HOSTNAME_LEN - (len(tag) + 1) # +1 for the hyphen
-        clean_base = InputPolicy.sanitize_hostname(base)[:max_base].strip('-')
-        return InputPolicy.sanitize_hostname(f"{clean_base}-{tag}")
-
-    dev_suggestions = [
-        format_dev_name(hardware_id),        # 1. Smart (mba2023)
-        format_dev_name(hardware_id, "camp"),# 2. Smart Campus (shortened tag for space)
-        format_dev_name(hardware_id, "wfh"), # 3. Smart WFH
-        format_dev_name(hostname, "camp"),   # 4. Hostname Campus
-        format_dev_name(hostname, "wfh"),    # 5. Hostname WFH
-        format_dev_name(hostname)            # 6. Simple
-    ]
-    
-    print(f"\n{Style.BOLD}Select Device Context:{Style.RESET}")
-    # Deduplicate while preserving order
-    seen = set()
-    final_suggestions = []
-    for s in dev_suggestions:
-        if s not in seen:
-            final_suggestions.append(s)
-            seen.add(s)
-
-    for i, name in enumerate(final_suggestions):
-        print(f"  [{Style.CYAN}{i+1}{Style.RESET}] {name}")
+        # Status Line
+        keys_found = [f for f in os.listdir(default_dir) if f.startswith("id_ed25519") and not f.endswith(".pub")]
+        payload_exists = os.path.exists(os.path.join(default_dir, "AuthorizedKeysPayload.txt"))
         
-    print(f"  [{Style.CYAN}{len(final_suggestions)+1}{Style.RESET}] Custom...")
-    
-    dev_choice = get_input("Select Option", "1")
-    
-    device_name = ""
-    try:
-        idx = int(dev_choice) - 1
-        if 0 <= idx < len(final_suggestions):
-            device_name = final_suggestions[idx]
-        else:
-             device_name = get_input("Enter Device Name (e.g. laptop-win)")
-    except:
-         device_name = get_input("Enter Device Name (e.g. laptop-win)")
-         
-    # Strict Hostname Sanitization via Policy
-    device_name = InputPolicy.sanitize_hostname(device_name)
-    print_success(f"Selected Device: {device_name}")
-
-    priv_path = None
-    pub_path = None
-
-    if wiz_mode == "2":
-        # --- IMPORT MODE ---
-        print(f"\n{Style.BOLD}--- Import Workflow ---{Style.RESET}")
-        existing_priv = get_input("Path to your existing PRIVATE key").strip()
-        # Remove quotes if user dragged/dropped file
-        existing_priv = existing_priv.replace('"', '').replace("'", "")
+        status_color = Style.GREEN if keys_found else Style.DIM
+        print(f"Status: {status_color}{len(keys_found)} Key(s) Found{Style.RESET} | Payload: {'✅' if payload_exists else '❌'}")
+        print(f"{Style.BLUE}----------------------------------------{Style.RESET}")
         
-        if not os.path.exists(existing_priv):
-            print_error(f"File not found: {existing_priv}")
-            return
+        print(f"  [{Style.CYAN}1{Style.RESET}] 🔑  Generate NEW Key Pair")
+        print(f"  [{Style.CYAN}2{Style.RESET}] 📥  Import EXISTING Private Key")
+        print(f"  [{Style.CYAN}3{Style.RESET}] 📦  Create Deployment Package (Zip)")
+        print(f"  [{Style.CYAN}4{Style.RESET}] 📜  View Archive History")
+        print(f"  [{Style.CYAN}5{Style.RESET}] ♻️   RESET and Archive Everything")
+        print(f"  [{Style.CYAN}6{Style.RESET}] 🚪  Exit")
+        print(f"{Style.BLUE}----------------------------------------{Style.RESET}")
+        print(f"  [{Style.CYAN}7{Style.RESET}] 🎒  Create Portable Wizard (Clean Zip)")
+        print(f"  [{Style.CYAN}8{Style.RESET}] 🔗  Merge Another Payload File")
+        
+        choice = get_input("\nSelect Option", "1")
 
-        # Prepare new names
-        key_name = f"id_ed25519_{device_name}_{final_user}"
-        new_priv_path = os.path.join(output_dir, key_name)
-        new_pub_path = f"{new_priv_path}.pub"
+        if choice == "6":
+            print(f"\n{Style.DIM}Goodbye 👋{Style.RESET}")
+            sys.exit(0)
 
-        # Regenerate Public Key (ssh-keygen -y)
-        print(f"Regenerating public key for {os.path.basename(existing_priv)}...")
-        try:
-            # -y flag reads private and outputs public to stdout
-            cmd = ["ssh-keygen", "-y", "-f", existing_priv]
-            pub_content = subprocess.check_output(cmd).decode().strip()
+        elif choice == "5":
+            archive_current_state(default_dir)
+            get_input("Press Enter to continue")
+            continue
             
-            # Add comment to the public key
-            comment = f"{final_user}@{device_name}-{datetime.date.today()}"
-            pub_content_with_comment = f"{pub_content} {comment}"
-
-            # Save Public Key
-            with open(new_pub_path, "w") as f:
-                f.write(pub_content_with_comment + "\n")
+        elif choice == "7":
+            create_portable_wizard(default_dir)
+            continue
             
-            # Copy Private Key
-            shutil.copy2(existing_priv, new_priv_path)
-            # Ensure strict permissions on copy (chmod 600 if not on windows)
-            if os.name != 'nt':
-                os.chmod(new_priv_path, 0o600)
+        elif choice == "8":
+            payload_path = os.path.join(default_dir, "AuthorizedKeysPayload.txt")
+            merge_external_payload(payload_path)
+            continue
 
-            print_success(f"Key Imported and Standardized: {key_name}")
-            log_action(f"IMPORTED EXISTING KEY: {key_name} (User: {final_user}, Device: {device_name}) | Source: {existing_priv}")
-            priv_path, pub_path = new_priv_path, new_pub_path
+        elif choice == "4":
+            view_history(history_dir)
+            continue
+            
+        elif choice == "3":
+            # Create Deployment Package
+            payload_path = os.path.join(default_dir, "AuthorizedKeysPayload.txt")
+            
+            # We need user/device context for the zip name
+            if keys_found and current_device == hardware_id: # Only auto-detect if user hasn't manually set it this session? No, simpler to just re-parse or ask.
+                 try:
+                    parts = keys_found[0].split('_')
+                    if len(parts) >= 4:
+                        current_device = parts[2]
+                        current_user = "_".join(parts[3:]) 
+                 except: pass
+            
+            print(f"\n{Style.BOLD}--- Package Creation ---{Style.RESET}")
+            print(f"Ctx: User={current_user}, Device={current_device}")
+            if get_input("Use this identity for package name? (yes/no)", "yes").lower() != 'yes':
+                 current_user = get_input("Enter Username")
+                 current_device = get_input("Enter Device Name")
 
-        except subprocess.CalledProcessError:
-            print_error("Failed to read private key. Is it password protected? (ssh-keygen requires the password to read it)")
-            return
-        except Exception as e:
-            print_error(f"Unexpected error during import: {e}")
-            return
+            create_deployment_package(default_dir, payload_path, current_user, current_device)
+            get_input("Press Enter to return to menu")
+            continue
 
-    else:
-        # --- GENERATE MODE ---
-        priv_path, pub_path = generate_key(final_user, device_name, output_dir)
+        elif choice in ["1", "2"]:
+            # --- Identity Setup (Shared) ---
+            suggestions = get_username_suggestions()
     
-    if priv_path and pub_path:
-        # 5. Success & Instructions
-        payload_path = os.path.join(output_dir, "AuthorizedKeysPayload.txt")
-        added = False
-        
-        print("\n" + f"{Style.BLUE}-{Style.RESET}" * 40)
-        print(f"{Style.BOLD}Deployment Step:{Style.RESET}")
-        print("To allow THIS computer to access your servers, we need to add its Public Key")
-        print("to the master list 'AuthorizedKeysPayload.txt'.")
-        
-        add_choice = get_input(f"Add this key to '{os.path.basename(payload_path)}'? (yes/no)", "yes")
-        if add_choice.lower() in ['yes', 'y']:
-            with open(pub_path, 'r') as f:
-                pub_content = f.read().strip()
+            print(f"\n{Style.BOLD}Select a standardized username:{Style.RESET}")
+            for i, name in enumerate(suggestions):
+                print(f"  [{Style.CYAN}{i+1}{Style.RESET}] {name}")
+            print(f"  [{Style.CYAN}{len(suggestions)+1}{Style.RESET}] Custom...")
             
-            # Check if already in payload to avoid duplicates
-            already_present = False
-            if os.path.exists(payload_path):
-                with open(payload_path, 'r') as f:
-                    if pub_content in f.read():
-                        already_present = True
+            user_choice = get_input("Select Option", "1")
             
-            if not already_present:
-                with open(payload_path, 'a') as f:
-                    f.write(f"\n# Key: {os.path.basename(priv_path)} (User: {final_user}, Device: {device_name})\n")
-                    f.write(pub_content + "\n")
-                print_success(f"Added to {os.path.basename(payload_path)}")
-                added = True
+            final_user = ""
+            try:
+                idx = int(user_choice) - 1
+                if 0 <= idx < len(suggestions):
+                    final_user = suggestions[idx]
+                else:
+                    final_user = get_input("Enter Custom Username (a-z0-9._- only)")
+            except:
+                 final_user = get_input("Enter Custom Username (a-z0-9._- only)")
+                 
+            final_user = InputPolicy.sanitize_username(final_user)
+            if len(final_user) < 2:
+                final_user = "admin"
+            print_success(f"Selected Username: {final_user}")
+            # Update loop state
+            current_user = final_user
+
+            # --- Device Setup ---
+            def format_dev_name(base, tag=None):
+                if not tag: return InputPolicy.sanitize_hostname(base)
+                max_base = InputPolicy.MAX_HOSTNAME_LEN - (len(tag) + 1)
+                clean_base = InputPolicy.sanitize_hostname(base)[:max_base].strip('-')
+                return InputPolicy.sanitize_hostname(f"{clean_base}-{tag}")
+
+            dev_suggestions = [
+                format_dev_name(hardware_id),        
+                format_dev_name(hardware_id, "camp"),
+                format_dev_name(hardware_id, "woc"),   # WORK ON CAMPUS
+                format_dev_name(hardware_id, "wfh"), 
+                format_dev_name(hostname, "camp"),   
+                format_dev_name(hostname, "woc"),      # WORK ON CAMPUS (Hostname)
+                format_dev_name(hostname, "wfh"),    
+                format_dev_name(hostname)            
+            ]
+            
+            print(f"\n{Style.BOLD}Select Device Context:{Style.RESET}")
+            seen = set()
+            final_suggestions = []
+            for s in dev_suggestions:
+                if s not in seen:
+                    final_suggestions.append(s)
+                    seen.add(s)
+
+            for i, name in enumerate(final_suggestions):
+                print(f"  [{Style.CYAN}{i+1}{Style.RESET}] {name}")
+            print(f"  [{Style.CYAN}{len(final_suggestions)+1}{Style.RESET}] Custom...")
+            
+            dev_choice = get_input("Select Option", "1")
+            
+            device_name = ""
+            try:
+                idx = int(dev_choice) - 1
+                if 0 <= idx < len(final_suggestions):
+                    device_name = final_suggestions[idx]
+                else:
+                     device_name = get_input("Enter Device Name")
+            except:
+                 device_name = get_input("Enter Device Name")
+            
+            device_name = InputPolicy.sanitize_hostname(device_name)
+            print_success(f"Selected Device: {device_name}")
+            # Update loop state
+            current_device = device_name
+
+            # --- Action ---
+            priv_path = None
+            pub_path = None
+            
+            if choice == "2":
+                # IMPORT
+                print(f"\n{Style.BOLD}--- Import Workflow ---{Style.RESET}")
+                existing_priv = get_input("Path to your existing PRIVATE key").strip()
+                existing_priv = existing_priv.replace('"', '').replace("'", "")
+                
+                if os.path.exists(existing_priv):
+                    key_name = f"id_ed25519_{device_name}_{final_user}"
+                    new_priv_path = os.path.join(default_dir, key_name)
+                    new_pub_path = f"{new_priv_path}.pub"
+                    
+                    try:
+                        cmd = ["ssh-keygen", "-y", "-f", existing_priv]
+                        pub_content = subprocess.check_output(cmd).decode().strip()
+                        comment = f"{final_user}@{device_name}-{datetime.date.today()}"
+                        pub_content_with_comment = f"{pub_content} {comment}"
+                        
+                        with open(new_pub_path, "w") as f:
+                            f.write(pub_content_with_comment + "\n")
+                        shutil.copy2(existing_priv, new_priv_path)
+                        if os.name != 'nt': os.chmod(new_priv_path, 0o600)
+                        
+                        print_success(f"Imported: {key_name}")
+                        log_action(f"IMPORTED: {key_name}")
+                        priv_path, pub_path = new_priv_path, new_pub_path
+                    except Exception as e:
+                        print_error(f"Import failed: {e}")
+                else:
+                    print_error("File not found.")
             else:
-                print(f"{Style.YELLOW}⚠️  Key already in payload file.{Style.RESET}")
-                added = True
+                # GENERATE
+                priv_path, pub_path = generate_key(final_user, device_name, default_dir)
 
-        # Final Report
-        print_report_card(priv_path, pub_path, payload_path, added)
+            if priv_path and pub_path:
+                # Add to Payload
+                payload_path = os.path.join(default_dir, "AuthorizedKeysPayload.txt")
+                added = False
+                
+                print("\n" + f"{Style.BLUE}-{Style.RESET}" * 40)
+                add_choice = get_input(f"Add to '{os.path.basename(payload_path)}'? (yes/no)", "yes")
+                if add_choice.lower() in ['yes', 'y']:
+                    with open(pub_path, 'r') as f: pub_content = f.read().strip()
+                    already_present = False
+                    if os.path.exists(payload_path):
+                         with open(payload_path, 'r') as f: 
+                            if pub_content in f.read(): already_present = True
+                    
+                    if not already_present:
+                        with open(payload_path, 'a') as f:
+                            f.write(f"\n# Key: {os.path.basename(priv_path)} ({final_user}@{device_name})\n")
+                            f.write(pub_content + "\n")
+                        added = True
+                        print_success("Added to Payload.")
+                    else:
+                        print(f"{Style.YELLOW}⚠️  Already in payload.{Style.RESET}")
+                        added = True
+                
+                print_report_card(priv_path, pub_path, payload_path, added)
+                get_input("Press Enter to return to main menu")
 
-    print(f"\n{Style.DIM}Wizard Finished. Goodbye 👋{Style.RESET}")
 
-if __name__ == "__main__":
-    main()
