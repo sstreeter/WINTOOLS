@@ -24,7 +24,20 @@ This generates your identity keys in `AuthorizedKeys/`.
 > **New:** The wizard can now automatically create a `Deploy-Package-<device>.zip` containing all necessary scripts and keys. Just answer "Yes" when prompted!
 
 
-### Step 2: Deploy
+### Step 2: Client Setup (Where to put your keys?)
+You must have the **Private Key** on the computer you are connecting *from*.
+
+| OS | Standard Location | Command to Connect |
+| :--- | :--- | :--- |
+| **Windows** | `C:\Users\You\.ssh\` | `ssh user@host` |
+| **Mac/Linux** | `~/.ssh/` | `ssh user@host` |
+| **Any (Custom)** | *Anywhere* | `ssh -i path/to/key user@host` |
+
+> [!IMPORTANT]
+> On Mac/Linux, you must secure the key permissions: `chmod 600 ~/.ssh/id_ed25519`
+
+### Step 3: Deploy
+
 
 You have two options for deployment:
 
