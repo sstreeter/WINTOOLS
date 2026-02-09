@@ -152,8 +152,14 @@ If you lost your private key or the configuration is broken:
     ```
 3.  This completely removes OpenSSH and its configuration. You can now start over.
 
-### 3. "Permission denied (publickey)"
+### 3. "Permission denied (publickey)" or It Asks for a Password
 This means the server rejected your key. Common causes:
-*   **Wrong Private Key:** Are you using the correct `id_ed25519` for this specific target?
-*   **Permissions:** On macOS/Linux, run `chmod 600 ~/.ssh/id_ed25519`.
-*   **Admin User:** Did you try to SSH as a non-admin? The default config limits access to the **Administrators** group.
+
+1.  **Client doesn't know about the key**:
+    *   Did you move the key to `~/.ssh/`?
+    *   If not, you **MUST** use `ssh -i path/to/key user@host`.
+2.  **Wrong User**: Are you logging in as the user you generated the key for?
+3.  **Permissions (Mac/Linux)**:
+    *   Run `ls -l ~/.ssh/id_ed25519`.
+    *   It **must** be `-rw-------`. If not, run `chmod 600 ~/.ssh/id_ed25519`.
+4.  **Admin User**: Did you try to SSH as a non-admin? The default config limits access to the **Administrators** group.
