@@ -45,6 +45,13 @@ If you manage servers from multiple computers (e.g., **Work Laptop** and **Home 
     *   **Combine them** into one master file.
     *   *Tip: Use `AuthorizedKeysPayload.example.txt` as a reference template.*
 
+> [!CAUTION]
+> **ACCIDENTAL COPYING WARNING**
+> Do **NOT** copy the `SSH/` folder in its entirety to Endpoint PCs or unsecured locations.
+> - The `AuthorizedKeys/` folder contains your **Private Keys** (Secrets).
+> - The `History/` folder contains your **Archived Secrets**.
+> - **Only** deploy the `Deploy-OpenSSH.ps1` script and the `AuthorizedKeysPayload.txt` (Public Keys) to target machines.
+
 ## 🔒 Security & Data Protection
 To prevent accidental data leaks, this project uses a "Local-Only" configuration model:
 

@@ -166,6 +166,35 @@ def generate_key(user, target_platform, output_dir, interactive=True):
         print_error("ssh-keygen command not found. Please install OpenSSH Client.")
         return None, None
 
+def archive_current_state(output_dir):
+    """Moves the entire current output directory into an archival history folder."""
+    if not os.path.exists(output_dir):
+        print(f"{Style.DIM}Nothing to archive (directory '{os.path.basename(output_dir)}' does not exist).{Style.RESET}")
+        return
+
+    # Check if directory is empty
+    if not os.listdir(output_dir):
+        print(f"{Style.DIM}Archive skipped (directory is empty).{Style.RESET}")
+        return
+
+    parent_dir = os.path.dirname(output_dir)
+    history_dir = os.path.join(parent_dir, "History")
+    os.makedirs(history_dir, exist_ok=True)
+
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    archive_name = f"Archive_{timestamp}"
+    archive_path = os.path.join(history_dir, archive_name)
+
+    print(f"\n{Style.YELLOW}📦 Archiving current state to {Style.BOLD}History/{archive_name}{Style.RESET}...")
+    
+    try:
+        shutil.move(output_dir, archive_path)
+        print_success(f"State Archived. Starting fresh.")
+        # Re-create empty directory for immediate use
+        os.makedirs(output_dir, exist_ok=True)
+    except Exception as e:
+        print_error(f"Failed to archive state: {e}")
+
 # --- Input Policy ---
 class InputPolicy:
     """Centralized policy for input validation and sanitization."""
@@ -330,15 +359,20 @@ def get_hardware_id():
 def main():
     print_header()
     
-    # 0. Mode Selection
-    print(f"\n{Style.BOLD}Select Wizard Mode:{Style.RESET}")
     print(f"  [{Style.CYAN}1{Style.RESET}] Generate NEW Ed25519 Key Pair (Recommended)")
     print(f"  [{Style.CYAN}2{Style.RESET}] Import EXISTING Private Key")
+    print(f"  [{Style.CYAN}3{Style.RESET}] RESET and Archive Current State")
     
     wiz_mode = get_input("Select Option", "1")
-    
-    # 1. Output Directory
+
+    # 1. Output Directory (Initialize first for Archive access)
     default_dir = os.path.join(os.getcwd(), "AuthorizedKeys")
+    
+    if wiz_mode == "3":
+        archive_current_state(default_dir)
+        # Restart main after reset
+        main()
+        return
     output_dir = get_input("Output Directory", default_dir)
     os.makedirs(output_dir, exist_ok=True)
     

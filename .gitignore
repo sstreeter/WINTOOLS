@@ -21,6 +21,7 @@ desktop.ini
 # 🔐 SSH Security (DO NOT REMOVE)
 # Ignore all generated keys and real payload data
 SSH/AuthorizedKeys/
+SSH/History/
 SSH/AuthorizedKeysPayload.txt
 *.pem
 *.key
