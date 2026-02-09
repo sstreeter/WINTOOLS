@@ -682,8 +682,17 @@ def view_history(history_dir, active_dir):
 
 def main():
     # 1. Initialization
-    default_dir = os.path.join(os.getcwd(), "AuthorizedKeys")
-    history_dir = os.path.join(os.getcwd(), "History")
+    current_cwd = os.getcwd()
+    if os.path.basename(current_cwd) == "AuthorizedKeys":
+        # We are already inside the folder
+        default_dir = current_cwd
+        parent_dir = os.path.dirname(current_cwd)
+        history_dir = os.path.join(parent_dir, "History")
+    else:
+        # We are in the project root (expected)
+        default_dir = os.path.join(current_cwd, "AuthorizedKeys")
+        history_dir = os.path.join(current_cwd, "History")
+
     os.makedirs(default_dir, exist_ok=True)
     
     # Pre-calculate Identity once (or could be re-calc'd if needed)
