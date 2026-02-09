@@ -615,7 +615,7 @@ CLIENT SETUP (Connecting):
 --------------------------
 1. Copy the PRIVATE key ({priv_key_name}) to your machine's ~/.ssh/ folder.
 2. Connect:
-   ssh {current_user}@{device_name}
+   ssh {final_user}@{device_name}
    (OR if using a shared admin account: ssh Administrator@{device_name})
 
 UNINSTALL:
@@ -923,9 +923,9 @@ def main():
                 
                 print(f"\n{Style.BOLD}--- Package Creation ---{Style.RESET}")
                 print(f"Ctx: User={current_user}, Device={current_device}")
-                if get_input("Use this identity for package name? (yes/no)", "yes").lower() != 'yes':
-                     current_user = get_input("Enter Username")
-                     current_device = get_input("Enter Device Name")
+                if get_input("Use this identity (for filenames/docs)? (yes/no)", "yes").lower() != 'yes':
+                     current_user = get_input("Enter User (e.g. spencer, admin)")
+                     current_device = get_input("Enter Device Name (e.g. macbook-pro)")
 
                 create_deployment_package(default_dir, payload_path, current_user, current_device)
                 get_input("Press Enter to return to menu", allow_empty=True)
