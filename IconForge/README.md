@@ -36,10 +36,14 @@ python IconForge.py
 - `core/`: Processing engines (Masking, Composition, Export).
 - `history/`: Log of previous icon generation tasks.
 
----
-## 👤 Author & Attribution
-**IconForge** is developed and maintained by **Spencer Streeter**.
-
-- ✅ **Free for personal and educational use**
-- ✅ **Requires attribution** (credit to Spencer Streeter)
 - ❌ **Commercial use prohibited** without permission
+
+---
+## 📜 Credits & Licensing
+This module uses several professional open-source projects:
+- **[PyQt6](https://www.riverbankcomputing.com/software/pyqt/)**: Used for the graphical user interface (GPLv3).
+- **[Pillow (PIL)](https://python-pillow.org/)**: Used for image processing (HPND).
+- **[NumPy](https://numpy.org/)**: Used for high-performance array operations (BSD).
+- **[SciPy](https://scipy.org/)**: Used for advanced multi-dimensional filtering (BSD).
+
+*All trademarks belong to their respective owners.*

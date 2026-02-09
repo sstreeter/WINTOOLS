@@ -34,6 +34,17 @@ A tool for managing and displaying USB device information on Windows.
 **WINTOOLS** uses a modular delegation pattern. The **[Provisioning](Provisioning/)** module acts as the central director for new workstation setups, delegating specialized tasks (like SSH and Remote Desktop hardening) to the standalone module scripts. This ensures a single source of truth for all security configurations.
 
 ---
+## 📜 Third-Party Credits
+**WINTOOLS** stands on the shoulders of these excellent open-source projects:
+
+| Module | Dependency | License |
+| :--- | :--- | :--- |
+| **IconForge** | PyQt6, Pillow, NumPy, SciPy | GPLv3, HPND, BSD |
+| **WINUSB** | wimlib, diskutil, hdiutil | GPLv3+, BSD |
+| **SSH** | OpenSSH Server (Windows) | BSD/MIT |
+| **NetScan** | Scapy (Optional) / Socket | GPLv2 / PSF |
+
+---
 ## 👤 Project Lead & Attribution
 **WINTOOLS** is developed and maintained by **Spencer Streeter**.
 
