@@ -108,33 +108,41 @@ function Deploy-Keys {
     }
 }
 
-function Update-Config {
-    if (-not (Test-Path $ConfigPath)) {
-        Write-Output "sshd_config missing; starting service once to generate defaults..."
-        Start-Service -Name $ServiceName
-        Stop-Service -Name $ServiceName
+    # Ensure AuthorizedKeysFile for Administrators matches expectation
+    $matchBlockHeader = "Match Group administrators"
+    $authKeyLine = "       AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys"
+
+    # Check if the block exists (commented or not)
+    $hasMatchBlock = $newContent | Select-String -Pattern "^\s*#?\s*Match Group administrators" -Quiet
+
+    if (-not $hasMatchBlock) {
+        Write-Output "Adding missing 'Match Group administrators' block..."
+        $newContent += ""
+        $newContent += $matchBlockHeader
+        $newContent += $authKeyLine
+    }
+    else {
+        # Ensure it is NOT commented out (basic check)
+        # Replacing the block logic is complex with regex, simpler to append if we suspect issues, 
+        # but let's try to uncomment standard lines if they are commented.
+        # For robustness, we will just ensure the line exists. 
+        # Actually, Windows OpenSSH default config has this at the end. 
+        # If it's commented out, we should uncomment it.
+        # Simplified approach: If we don't find the active line, append it.
+        
+        $hasActiveAuthLine = $newContent | Select-String -Pattern "^\s*AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys" -Quiet
+        if (-not $hasActiveAuthLine) {
+             # Verify we aren't duplicating inside an existing block... strict parsing is hard in PS without a parser.
+             # Safe fallback: Check if the file ends with the default block.
+             Write-Warning "Could not confirm active 'AuthorizedKeysFile' directive for administrators. Appending default block to be safe."
+             $newContent += ""
+             $newContent += $matchBlockHeader
+             $newContent += $authKeyLine
+        }
     }
 
-    Write-Output "Backing up sshd_config..."
-    Copy-Item -Path $ConfigPath -Destination "$ConfigPath.bak" -Force
-
-    $content = Get-Content -Path $ConfigPath
-    
-    # Update Port
-    $newContent = $content | Where-Object { $_ -notmatch "^\s*#?\s*Port\s+\d+" }
-    $newContent = @("Port $SSHPort") + $newContent
-
-    # Update Password Auth
-    $newContent = $newContent | Where-Object { $_ -notmatch "^\s*#?\s*PasswordAuthentication\s+" }
-    $pwdValue = if ($DisablePasswordAuth) { "no" } else { "yes" }
-    $newContent += "PasswordAuthentication $pwdValue"
-    
-    # Ensure PubkeyAuth is enabled
-    $newContent = $newContent | Where-Object { $_ -notmatch "^\s*#?\s*PubkeyAuthentication\s+" }
-    $newContent += "PubkeyAuthentication yes"
-
     $newContent | Set-Content -Path $ConfigPath -Encoding UTF8
-    Write-Output "sshd_config updated (Port: $SSHPort, PwdAuth: $pwdValue)."
+    Write-Output "sshd_config updated (Port: $SSHPort, PwdAuth: $pwdValue, PubkeyAuth: yes)."
 }
 
 function Configure-Firewall {

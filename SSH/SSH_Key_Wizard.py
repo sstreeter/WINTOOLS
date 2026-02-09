@@ -436,6 +436,9 @@ def create_deployment_package(output_dir, payload_path, final_user, device_name)
         else:
             print(f"{Style.RED}❌ Error: Script '{filename}' not found in '{script_dir}'.{Style.RESET}")
 
+    # Derive key name for documentation
+    priv_key_name = f"id_ed25519_{device_name}_{final_user}"
+
     # 3. Create README.txt
     readme_content = f"""
 WINTOOLS: SSH Deployment Package
@@ -451,8 +454,20 @@ INSTRUCTIONS:
 
    powershell -ExecutionPolicy Bypass -File .\\Deploy-OpenSSH.ps1 -KeysFile .\\{payload_name} -DisablePasswordAuth $true
 
-4. To test, try SSHing into this machine from your admin station:
-   ssh {final_user}@{device_name}
+4. CLIENT SETUP (On your Admin/Connect machine):
+   -----------------------------------------------
+   You must have the PRIVATE key ({priv_key_name}) on the computer you are connecting FROM.
+   
+   Option A (Recommended): continuous use
+   - Move the private key to your user's .ssh directory (e.g., C:\\Users\\You\\.ssh\\ or ~/.ssh/).
+   - Connect using: ssh {final_user}@{device_name}
+   
+   Option B: One-off use
+   - Keep the key anywhere and specify it:
+   - ssh -i "path\\to\\{priv_key_name}" {final_user}@{device_name}
+
+5. To test connectivity:
+   ssh -i .\\{priv_key_name} {final_user}@{device_name}
 
 UNINSTALL:
 ----------
