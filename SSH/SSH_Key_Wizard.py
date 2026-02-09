@@ -497,8 +497,39 @@ def review_payload(payload_path):
             except: pass
             return "0000-00-00"
 
-        # Sort descending (Newest date at top)
-        lines.sort(key=get_date_key, reverse=True)
+        # 2. Sort Logic
+        # Helper to get date
+        import re
+        def get_date_key(line):
+            try:
+                parts = line.split()
+                if len(parts) > 2:
+                    comment = parts[-1]
+                    # Find YYYY-MM-DD
+                    match = re.search(r'(\d{4}-\d{2}-\d{2})', comment)
+                    if match:
+                        return match.group(1)
+            except: pass
+            return "0000-00-00"
+            
+        # Split into Current vs Others (To pin Current to top)
+        current_list = []
+        other_list = []
+        
+        for line in lines:
+            parts = line.split()
+            key_body = parts[1] if len(parts) > 1 else ""
+            
+            if key_body in local_pub_keys:
+                current_list.append(line)
+            else:
+                other_list.append(line)
+        
+        # Sort "Others" by Date (Newest first)
+        other_list.sort(key=get_date_key, reverse=True)
+        
+        # Combine: Current always first, then sorted history
+        lines = current_list + other_list
 
         print(f"   Found {len(lines)} authorized key(s).")
         print(f"   {Style.YELLOW}Review carefully. Remove keys that are no longer needed.{Style.RESET}")
@@ -506,7 +537,7 @@ def review_payload(payload_path):
         keep_indices = set(range(len(lines)))
         
         while True:
-            print(f"\n   {Style.BOLD}Current Payload (Sorted Newest-to-Oldest):{Style.RESET}")
+            print(f"\n   {Style.BOLD}Current Payload (Top = Active | Rest = History):{Style.RESET}")
             legacy_count = 0
             
             for i, line in enumerate(lines):
