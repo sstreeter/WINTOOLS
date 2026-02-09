@@ -1,0 +1,10 @@
+# --- EXAMPLE PAYLOAD FILE ---
+# This is a stub file to demonstrate the format.
+# DO NOT put real keys here if you plan to commit this file.
+# The Wizard creates "AuthorizedKeysPayload.txt" (which is git-ignored) for real keys.
+
+# Key: id_ed25519_office-laptop_admin (EXAMPLE)
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyContentPlaceHolder000000000000 admin@office-laptop
+
+# Key: id_ed25519_home-pc_admin (EXAMPLE)
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAnotherExampleKeyPlaceHolder11111111111 admin@home-pc

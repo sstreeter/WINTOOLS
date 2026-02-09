@@ -1,0 +1,53 @@
+# --- WINTOOLS Root .gitignore ---
+
+# 🐍 Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+env/
+ENV/
+
+# 🍏 macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# 🪟 Windows
+thumbs.db
+desktop.ini
+
+# 🔐 SSH Security (DO NOT REMOVE)
+# Ignore all generated keys and real payload data
+SSH/AuthorizedKeys/
+SSH/AuthorizedKeysPayload.txt
+*.pem
+*.key
+*.pub
+!SSH/AuthorizedKeysPayload.example.txt
+
+# 🔍 NetScan Data
+# Ignore user-specific subnet lists
+NetScan/nets.txt
+NetScan/manuf
+NetScan/manuf_hash.txt
+
+# 🎨 IconForge Assets
+IconForge/history/
+IconForge/resources/temp/
+
+# 🚀 Provisioning Logs
+# Standard log naming patterns
+*.log
+
+# 🔌 WINUSB / ISOs
+*.iso
+*.dmg
+
+# 🛠️ IDE / Workspace
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
