@@ -23,9 +23,9 @@
     $true to disable PasswordAuthentication after verifying keys work.
 
 .NOTES
-    Version: 3.2
-    Author: Antigravity
-    Date: 2026-02-08
+    Version: 3.2.1
+    Author: Antigravity (fixed & improved)
+    Date: 2026-02-09
 #>
 
 param (
@@ -40,18 +40,14 @@ param (
 $LogDir = "$env:ProgramData\WINTOOLS\Logs"
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
 $LogFile = Join-Path $LogDir "Deploy-OpenSSH.log"
-Start-Transcript -Path $LogFile -Append
+Start-Transcript -Path $LogFile -Append -Force
 
-# Suppress output if silent
-if ($Silent) {
-    # Redirect output to null but keep transcript logging if desired
-    # For now, we just skip the initial greeting
-} else {
+if (-not $Silent) {
     Write-Output "--- Starting OpenSSH Deployment: $(Get-Date) ---"
 }
 
 # --- Administrator Check ---
-if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Warning "This script must be run as Administrator."
     Stop-Transcript
     Exit 1
@@ -69,133 +65,317 @@ if ($osVersion.Major -lt 10 -or ($osVersion.Major -eq 10 -and $osVersion.Build -
 }
 
 # --- Load Keys from File ---
-if ($KeysFile -and (Test-Path $KeysFile)) {
+if ($KeysFile -and (Test-Path $KeysFile -PathType Leaf)) {
     Write-Output "Loading keys from file: $KeysFile"
-    $FileKeys = Get-Content $KeysFile | Where-Object { $_ -match "^ssh-" }
+    $FileKeys = Get-Content $KeysFile -ErrorAction SilentlyContinue | Where-Object { $_ -match '^\s*ssh-' }
     $AdminKeys += $FileKeys
 }
 
 # --- Configuration ---
-$ServiceName = "sshd"
+$ServiceName    = "sshd"
 $CapabilityName = "OpenSSH.Server~~~~0.0.1.0"
-$SSHDataPath = "$env:ProgramData\ssh"
+$SSHDataPath    = "$env:ProgramData\ssh"
 $AuthorizedKeysPath = Join-Path $SSHDataPath "administrators_authorized_keys"
-$ConfigPath = Join-Path $SSHDataPath "sshd_config"
+$ConfigPath     = Join-Path $SSHDataPath "sshd_config"
 
 # --- Helper Functions ---
-function Deploy-Keys {
-    param ([string[]]$KeyArray)
-    
-    if (-not (Test-Path $SSHDataPath)) { New-Item -ItemType Directory -Path $SSHDataPath -Force | Out-Null }
 
-    # Deduplicate and Clean Keys
-    $UniqueKeys = $KeyArray | Select-Object -Unique | Where-Object { $_ -notmatch "^\s*$" }
+function Deploy-Keys {
+    param (
+        [string[]]$KeyArray
+    )
+
+    if (-not (Test-Path $SSHDataPath)) {
+        New-Item -ItemType Directory -Path $SSHDataPath -Force | Out-Null
+    }
+
+    # Deduplicate and clean keys
+    $UniqueKeys = $KeyArray | Select-Object -Unique | Where-Object { $_ -notmatch '^\s*$' -and $_ -match '^\s*ssh-' }
 
     if ($UniqueKeys.Count -gt 0) {
-        $UniqueKeys | Set-Content -Path $AuthorizedKeysPath -Force
+        # Use ASCII to avoid BOM issues
+        $UniqueKeys | Set-Content -Path $AuthorizedKeysPath -Force -Encoding ASCII
         Write-Output "Deployed $($UniqueKeys.Count) unique admin key(s) to $AuthorizedKeysPath"
 
-        # Set strict permissions (System + Administrators Only)
-        $acl = New-Object System.Security.AccessControl.FileSecurity
-        $acl.SetAccessRuleProtection($true, $false) # Disable inheritance
-        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("BUILTIN\Administrators", "FullControl", "Allow")))
-        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("NT AUTHORITY\SYSTEM", "FullControl", "Allow")))
+        # Set strict permissions (Administrators + SYSTEM only)
+        $acl = Get-Acl $AuthorizedKeysPath
+        $acl.SetAccessRuleProtection($true, $false)  # Disable inheritance
+
+        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule(
+            "BUILTIN\Administrators", "FullControl", "Allow")))
+        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule(
+            "NT AUTHORITY\SYSTEM", "FullControl", "Allow")))
+
         Set-Acl -Path $AuthorizedKeysPath -AclObject $acl
-        Write-Output "Permissions set on authorized_keys (Admins/System Only)."
+        Write-Output "Strict permissions applied to authorized_keys (Admins + SYSTEM only)."
     }
     else {
-        Write-Warning "No valid admin keys provided. SSH access will be limited!"
+        Write-Warning "No valid admin keys provided → key-based SSH access will NOT work!"
     }
 }
 
-    # Ensure AuthorizedKeysFile for Administrators matches expectation
-    $matchBlockHeader = "Match Group administrators"
-    $authKeyLine = "       AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys"
+function Update-Config {
+    param (
+        [int]$Port,
+        [bool]$DisablePwdAuth
+    )
 
-    # Check if the block exists (commented or not)
-    $hasMatchBlock = $newContent | Select-String -Pattern "^\s*#?\s*Match Group administrators" -Quiet
+    $pwdValue = if ($DisablePwdAuth) { 'no' } else { 'yes' }
 
-    if (-not $hasMatchBlock) {
-        Write-Output "Adding missing 'Match Group administrators' block..."
-        $newContent += ""
-        $newContent += $matchBlockHeader
-        $newContent += $authKeyLine
+    if (-not (Test-Path $ConfigPath)) {
+        Write-Warning "sshd_config not found → creating minimal config"
+        @(
+            "Port $Port",
+            "PubkeyAuthentication yes",
+            "PasswordAuthentication $pwdValue"
+        ) | Set-Content -Path $ConfigPath -Encoding ASCII
+        return
     }
-    else {
-        # Ensure it is NOT commented out (basic check)
-        # Replacing the block logic is complex with regex, simpler to append if we suspect issues, 
-        # but let's try to uncomment standard lines if they are commented.
-        # For robustness, we will just ensure the line exists. 
-        # Actually, Windows OpenSSH default config has this at the end. 
-        # If it's commented out, we should uncomment it.
-        # Simplified approach: If we don't find the active line, append it.
+
+    # Use ASCII/Default to read - avoiding explicit UTF8 might be safer if file has no BOM
+    $lines = Get-Content $ConfigPath
+    $newLines = @()
+    $inAdminMatchBlock = $false
+    $addedMatchBlock = $false
+
+    foreach ($line in $lines) {
+        $trimmed = $line.Trim()
+
+        if ($trimmed -match '^#?\s*Port\s') {
+            $newLines += "Port $Port"
+            continue
+        }
+        if ($trimmed -match '^#?\s*PasswordAuthentication\s') {
+            $newLines += "PasswordAuthentication $pwdValue"
+            continue
+        }
+        if ($trimmed -match '^#?\s*PubkeyAuthentication\s') {
+            $newLines += "PubkeyAuthentication yes"
+            continue
+        }
+
+        if ($trimmed -eq 'Match Group administrators') {
+            $inAdminMatchBlock = $true
+            $newLines += $line
+            continue
+        }
+
+        if ($inAdminMatchBlock -and $trimmed -match '^#?\s*AuthorizedKeysFile') {
+            $newLines += "    AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys"
+            $inAdminMatchBlock = $false
+            continue
+        }
+
+        $newLines += $line
+    }
+
+    # Append Match block if missing
+    if (-not ($newLines -match 'Match Group administrators')) {
+        Write-Output "Adding missing 'Match Group administrators' block to sshd_config"
+        $newLines += ""
+        $newLines += "Match Group administrators"
+        $newLines += "    AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys"
+        $addedMatchBlock = $true
+    }
+
+    # IMPORTANT: Use ASCII encoding to prevent BOM which breaks sshd on Windows
+    $newLines | Set-Content -Path $ConfigPath -Encoding ASCII
+    
+    # FIX PERMISSIONS GLOBALLY on C:\ProgramData\ssh (Critical for Service Start)
+    try {
+        # Host Keys MUST be accessible by SYSTEM (and Admins) but NO ONE ELSE.
+        # We apply this to the whole folder to be safe.
+        $acl = Get-Acl $SSHDataPath
+        $acl.SetAccessRuleProtection($true, $false) # Disable inheritance
+        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("BUILTIN\Administrators", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")))
+        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("NT AUTHORITY\SYSTEM", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")))
+        Set-Acl -Path $SSHDataPath -AclObject $acl
         
-        $hasActiveAuthLine = $newContent | Select-String -Pattern "^\s*AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys" -Quiet
-        if (-not $hasActiveAuthLine) {
-             # Verify we aren't duplicating inside an existing block... strict parsing is hard in PS without a parser.
-             # Safe fallback: Check if the file ends with the default block.
-             Write-Warning "Could not confirm active 'AuthorizedKeysFile' directive for administrators. Appending default block to be safe."
-             $newContent += ""
-             $newContent += $matchBlockHeader
-             $newContent += $authKeyLine
+        # Re-apply strict file-level permissions for existing files
+        Get-ChildItem -Path $SSHDataPath -Recurse | ForEach-Object {
+            try {
+                Set-Acl -Path $_.FullName -AclObject $acl
+            } catch {}
+        }
+        Write-Output "Fixed permissions on ALL SSH files (Admins + SYSTEM only)."
+    } catch {
+        Write-Warning "Failed to set strict permissions on SSH folder: $_"
+    }
+
+    Write-Output "sshd_config updated (Port: $Port, PasswordAuthentication: $pwdValue, PubkeyAuthentication: yes)"
+    
+    # VALIDATE CONFIG
+    Write-Output "Validating sshd_config syntax..."
+    $sshdPath = "C:\Windows\System32\OpenSSH\sshd.exe"
+    if (Test-Path $sshdPath) {
+        try {
+            # Capture stderr/stdout 
+            $pinfo = New-Object System.Diagnostics.ProcessStartInfo
+            $pinfo.FileName = $sshdPath
+            $pinfo.Arguments = "-t"
+            $pinfo.RedirectStandardError = $true
+            $pinfo.RedirectStandardOutput = $true
+            $pinfo.UseShellExecute = $false
+            $p = New-Object System.Diagnostics.Process
+            $p.StartInfo = $pinfo
+            $p.Start() | Out-Null
+            $p.WaitForExit()
+            $stderr = $p.StandardError.ReadToEnd()
+            $stdout = $p.StandardOutput.ReadToEnd()
+            
+            if ($p.ExitCode -ne 0) {
+                Write-Error "sshd_config SYNTAX ERROR (Exit Code $($p.ExitCode)):"
+                Write-Error "$stderr $stdout"
+            } else {
+                Write-Output "Syntax Check: OK"
+            }
+        } catch {
+            Write-Warning "Could not run sshd -t validation: $_"
         }
     }
-
-    $newContent | Set-Content -Path $ConfigPath -Encoding UTF8
-    Write-Output "sshd_config updated (Port: $SSHPort, PwdAuth: $pwdValue, PubkeyAuth: yes)."
 }
 
 function Configure-Firewall {
-    $FirewallRuleName = "OpenSSH Server Custom Port ($SSHPort)"
-    Remove-NetFirewallRule -DisplayName $FirewallRuleName -ErrorAction SilentlyContinue
+    param (
+        [int]$Port
+    )
 
-    New-NetFirewallRule -Name "OpenSSH-Server-Custom-$SSHPort" `
-        -DisplayName $FirewallRuleName `
-        -Description "Allow SSH inbound on port $SSHPort" `
-        -Enabled True -Direction Inbound -Protocol TCP -LocalPort $SSHPort -Action Allow
-    Write-Output "Firewall rule created for Port $SSHPort."
+    $ruleName = "OpenSSH Server (Port $Port)"
+    Remove-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
+
+    New-NetFirewallRule -Name "OpenSSH-Server-$Port" `
+        -DisplayName $ruleName `
+        -Description "Allow SSH inbound on TCP/$Port" `
+        -Enabled True `
+        -Direction Inbound `
+        -Protocol TCP `
+        -LocalPort $Port `
+        -Action Allow | Out-Null
+
+    Write-Output "Firewall rule created/updated for TCP port $Port"
 }
 
 # --- Main Execution ---
 try {
-    # 1. Install OpenSSH
+    # 1. Install OpenSSH Server
     Write-Output "Checking OpenSSH Server capability..."
-    $capability = Get-WindowsCapability -Online | Where-Object { $_.Name -like $CapabilityName }
+    $capability = Get-WindowsCapability -Online | Where-Object { $_.Name -eq $CapabilityName }
     if ($capability.State -ne 'Installed') {
         Write-Output "Installing OpenSSH Server..."
-        Add-WindowsCapability -Online -Name $CapabilityName
-    }
-    else { Write-Output "OpenSSH Server is already installed." }
-
-    # 2. Configure Service
-    Write-Output "Configuring sshd service startup..."
-    Set-Service -Name $ServiceName -StartupType Automatic
-
-    # 3. Deploy Keys & Config
-    Deploy-Keys -KeyArray $AdminKeys
-    Update-Config
-    Configure-Firewall
-
-    # 4. Restart Service
-    Write-Output "Starting sshd service..."
-    Restart-Service -Name $ServiceName -Force
-
-    # 5. Verify
-    Start-Sleep -Seconds 2
-    $svc = Get-Service -Name $ServiceName
-    if ($svc.Status -eq 'Running') {
-        Write-Output "Deployment SUCCESS. SSH listening on port $SSHPort."
+        Add-WindowsCapability -Online -Name $CapabilityName | Out-Null
+        Write-Output "Installation complete."
     }
     else {
-        Write-Error "Deploy FAILED: Service is not running."
-        # Self-healing logic could go here (reverted for brevity in this refined version)
+        Write-Output "OpenSSH Server already installed."
+    }
+    
+    # 2. Deploy keys
+    Deploy-Keys -KeyArray $AdminKeys
+
+    # 3. Update configuration
+    Update-Config -Port $SSHPort -DisablePwdAuth $DisablePasswordAuth.IsPresent
+
+    # 4. Firewall
+    Configure-Firewall -Port $SSHPort
+
+    # 5. Service configuration & restart
+    Write-Output "Configuring sshd service..."
+    # FIX: Remove "ssh-agent" dependency which often breaks sshd start on Windows 10/11
+    # We use sc.exe because Set-Service doesn't handle dependencies well
+    cmd.exe /c "sc.exe config sshd depend= /" | Out-Null
+
+    # ENSURE HOST KEYS EXIST (Crucial for service start)
+    $sshKeyGen = "C:\Windows\System32\OpenSSH\ssh-keygen.exe"
+    if (Test-Path $sshKeyGen) {
+         Write-Output "Ensuring host keys exist..."
+         & $sshKeyGen -A
     }
 
+    Write-Output "Setting sshd service to Automatic startup..."
+    Set-Service -Name $ServiceName -StartupType Automatic -ErrorAction Stop
+
+    Write-Output "Stopping any stuck processes..."
+    Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+    Stop-Process -Name "sshd" -Force -ErrorAction SilentlyContinue
+
+    Write-Output "Starting sshd service..."
+    try {
+        Start-Service -Name $ServiceName -ErrorAction Stop
+    } catch {
+        Write-Error "FAILED to start sshd service."
+        Write-Output "--- DIAGNOSTIC REPORT ---"
+        
+        # 1. OpenSSH Application Logs
+        $events = Get-EventLog -LogName Application -Source "OpenSSH" -Newest 5 -EntryType Error -ErrorAction SilentlyContinue
+        if ($events) {
+            Write-Warning "[Application Log] OpenSSH Errors:"
+            foreach ($e in $events) { Write-Warning "  [$($e.TimeGenerated)] $($e.Message)" }
+        } else {
+            Write-Warning "[Application Log] No 'OpenSSH' related errors found."
+        }
+
+        # 2. System Logs (Service Control Manager)
+        $sysEvents = Get-EventLog -LogName System -Source "Service Control Manager" -Newest 5 -EntryType Error -ErrorAction SilentlyContinue
+        if ($sysEvents) {
+            Write-Warning "[System Log] Service Control Manager Errors:"
+            foreach ($e in $sysEvents) { Write-Warning "  [$($e.TimeGenerated)] $($e.Message)" }
+        }
+
+        # 3. Manual Debug Run (Last Resort)
+        Write-Output "Attempting manual 'sshd.exe -d' run to capture startup errors..."
+        $sshdExe = "C:\Windows\System32\OpenSSH\sshd.exe"
+        if (Test-Path $sshdExe) {
+            try {
+                $p = New-Object System.Diagnostics.Process
+                $p.StartInfo.FileName = $sshdExe
+                $p.StartInfo.Arguments = "-d" # Debug mode (runs once then exits, or prints error)
+                $p.StartInfo.RedirectStandardError = $true
+                $p.StartInfo.RedirectStandardOutput = $true
+                $p.StartInfo.UseShellExecute = $false
+                $p.Start() | Out-Null
+                
+                # Wait briefly - if it stays running, it's actually working (but service failed?)
+                # If it exits immediately, it usually prints why.
+                if ($p.WaitForExit(2000)) {
+                    $err = $p.StandardError.ReadToEnd()
+                    $out = $p.StandardOutput.ReadToEnd()
+                    Write-Error "MANUAL RUN ERROR: Exit Code $($p.ExitCode)"
+                    Write-Error "STDERR: $err"
+                    Write-Error "STDOUT: $out"
+                } else {
+                    Write-Warning "Manual 'sshd -d' started successfully and is running... (killing it now)"
+                    $p.Kill()
+                    Write-Warning "This implies the config is valid but the Service Environment is the issue (Logon as Service?)"
+                }
+            } catch {
+                Write-Warning "Could not run manual debug: $_"
+            }
+        }
+        
+        throw "Service startup failed. Review the diagnostics above."
+    }
+
+    Start-Sleep -Seconds 3
+    $svc = Get-Service -Name $ServiceName
+    
+    if ($svc.Status -eq 'Running') {
+        Write-Output "SUCCESS: OpenSSH Server is running on port $SSHPort."
+        if ($DisablePasswordAuth) {
+            Write-Output "Password authentication is DISABLED (key-based only)."
+        }
+    }
+    else {
+        # Check specific error common with bad config
+        Write-Error "Service is not running (Status: $($svc.Status))."
+        Write-Warning "This often happens if sshd_config has bad syntax or file permissions are wrong."
+        Write-Warning "Check log: $LogFile"
+        Exit 2
+    }
 }
 catch {
-    Write-Error "Deployment ERROR: $_"
-    Stop-Transcript
+    Write-Error "Deployment failed: $_"
     Exit 1
 }
-
-Stop-Transcript
+finally {
+    Stop-Transcript
+}

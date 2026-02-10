@@ -510,11 +510,12 @@ def review_payload(payload_path):
                     if match:
                         return match.group(1)
             except: pass
-            return "0000-00-00"
+            return None # Return None for undated keys to handle them specially
             
         # Split into Current vs Others (To pin Current to top)
         current_list = []
-        other_list = []
+        dated_list = []
+        undated_list = []
         
         for line in lines:
             parts = line.split()
@@ -523,13 +524,18 @@ def review_payload(payload_path):
             if key_body in local_pub_keys:
                 current_list.append(line)
             else:
-                other_list.append(line)
+                date = get_date_key(line)
+                if date:
+                    dated_list.append(line)
+                else:
+                    undated_list.append(line)
         
-        # Sort "Others" by Date (Newest first)
-        other_list.sort(key=get_date_key, reverse=True)
+        # Sort "Dated" by Date (Newest first)
+        dated_list.sort(key=get_date_key, reverse=True)
         
-        # Combine: Current always first, then sorted history
-        lines = current_list + other_list
+        # Combine: Current -> Undated (might be new/manual) -> Rated History (Newest->Oldest)
+        # This fixes the issue where new keys without dates (or failed parsing) went to the very bottom.
+        lines = current_list + undated_list + dated_list
 
         print(f"   Found {len(lines)} authorized key(s).")
         print(f"   {Style.YELLOW}Review carefully. Remove keys that are no longer needed.{Style.RESET}")
