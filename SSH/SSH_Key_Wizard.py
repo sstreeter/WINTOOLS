@@ -808,6 +808,11 @@ def create_deployment_package(output_dir, payload_path, final_user, device_name)
     if create_pkg.lower() not in ['yes', 'y']:
         return
 
+    # Debug Timing
+    import time
+    t_start = time.time()
+    print(f"\n   ⏳ Initializing Package Build... [T+0.00s]")
+
     # Security Review
     if os.path.exists(payload_path):
         review = get_input("Quick Review of key list? (yes/no)", "no")
@@ -818,8 +823,14 @@ def create_deployment_package(output_dir, payload_path, final_user, device_name)
 
     # 1. Prepare Staging Area
     staging_dir = os.path.join(output_dir, "Deploy_Package_Staging")
+    
+    # Log initial cleanup (suspect area)
     if os.path.exists(staging_dir):
+        st = time.time()
+        print(f"   [Debug] Clearing old staging area... ({st - t_start:.2f}s)")
         shutil.rmtree(staging_dir)
+        print(f"   [Debug] Validating cleanup... (+{time.time() - st:.2f}s)")
+        
     os.makedirs(staging_dir)
     
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -851,9 +862,6 @@ def create_deployment_package(output_dir, payload_path, final_user, device_name)
     total_ops = staging_steps + zipping_steps
     current_op = 0
 
-    # Debug Timing
-    import time
-    t_start = time.time()
     print(f"\n   ⏳ Building Package ({total_ops} operations)... [T+0.00s]")
     print_progress_bar(current_op, total_ops, prefix='Progress:', suffix='Starting...', length=30)
     
