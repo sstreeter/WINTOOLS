@@ -912,18 +912,32 @@ MacOS:   sudo bash ./Platforms/Mac/Uninstall-SSH-Mac.sh
             for src_rel, arcname in files_to_copy.items():
                 src = os.path.join(script_dir, src_rel)
                 
+                # Trace Start
+                t_file = time.time()
+                print(f" [Trace] Reading: {src_rel}...", end="", flush=True)
+                
                 if os.path.exists(src):
-                    zipf.write(src, arcname)
+                    try:
+                        # Read into memory explicitly to test read speed vs zip write speed
+                        with open(src, 'rb') as f:
+                            data = f.read()
+                        zipf.writestr(arcname, data)
+                        print(f" Done ({time.time() - t_file:.4f}s)")
+                    except Exception as e:
+                        print(f" ERROR: {e}")
                 else:
                     print(f"{Style.RED}❌ Error: Script '{src_rel}' not found.{Style.RESET}")
                 
                 current_op += 1
                 elapsed = time.time() - t_start
                 print_progress_bar(current_op, total_ops, prefix='Compiling:', suffix=f'({elapsed:.1f}s)', length=30)
+                sys.stdout.flush()
 
             # 2. Add Payload
             if has_payload:
+                print(f" [Trace] Adding Payload...", end="", flush=True)
                 zipf.write(payload_path, payload_name)
+                print(" Done.")
                 current_op += 1
                 elapsed = time.time() - t_start
                 print_progress_bar(current_op, total_ops, prefix='Compiling:', suffix=f'({elapsed:.1f}s)', length=30)
