@@ -275,9 +275,20 @@ try {
 
     # 2.5 Ensure Host Keys (Required for Config Validation)
     $sshKeyGen = "C:\Windows\System32\OpenSSH\ssh-keygen.exe"
+    
+    # Wait for binary to appear (sometimes delayed after fresh install)
+    $retries = 0
+    while (-not (Test-Path $sshKeyGen) -and $retries -lt 6) {
+        Write-Output "Waiting for OpenSSH binaries... ($retries/6)"
+        Start-Sleep -Seconds 2
+        $retries++
+    }
+
     if (Test-Path $sshKeyGen) {
          Write-Output "Ensuring host keys exist..."
          & $sshKeyGen -A
+    } else {
+        Write-Warning "ssh-keygen.exe not found at $sshKeyGen - Host keys may be missing!"
     }
 
     # 3. Update configuration
