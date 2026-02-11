@@ -485,18 +485,6 @@ def review_payload(payload_path):
         # Sort by Date (Newest First)
         # Key format: ... user@host-YYYY-MM-DD
         import re
-        def get_date_key(line):
-            try:
-                parts = line.split()
-                if len(parts) > 2:
-                    comment = parts[-1]
-                    # Find YYYY-MM-DD
-                    match = re.search(r'(\d{4}-\d{2}-\d{2})', comment)
-                    if match:
-                        return match.group(1)
-            except: pass
-            return "0000-00-00"
-
         # 2. Sort Logic
         # Helper to get date
         import re
@@ -803,10 +791,12 @@ def create_deployment_package(output_dir, payload_path, final_user, device_name)
     
     # 2. Copy Scripts
     files_to_copy = {
-        "Deploy-OpenSSH.ps1": "Deploy-OpenSSH.ps1",
-        "Uninstall-OpenSSH.ps1": "Uninstall-OpenSSH.ps1",
-        "Deploy-Linux.sh": "Deploy-Linux.sh",
-        "Deploy-Mac.sh": "Deploy-Mac.sh",
+        "Deploy-SSH-Windows.ps1": "Deploy-SSH-Windows.ps1",
+        "Uninstall-SSH-Windows.ps1": "Uninstall-SSH-Windows.ps1",
+        "Deploy-SSH-Linux.sh": "Deploy-SSH-Linux.sh",
+        "Uninstall-SSH-Linux.sh": "Uninstall-SSH-Linux.sh",
+        "Deploy-SSH-Mac.sh": "Deploy-SSH-Mac.sh",
+        "Uninstall-SSH-Mac.sh": "Uninstall-SSH-Mac.sh",
     }
     
     payload_name = os.path.basename(payload_path)
@@ -822,8 +812,22 @@ def create_deployment_package(output_dir, payload_path, final_user, device_name)
         src = os.path.join(script_dir, filename)
         if os.path.exists(src):
             shutil.copy2(src, os.path.join(staging_dir, dest_name))
+            # Make sure shell scripts are executable
+            if dest_name.endswith(".sh") and os.name == 'posix':
+                try: os.chmod(os.path.join(staging_dir, dest_name), 0o755)
+                except: pass
         else:
-            print(f"{Style.RED}❌ Error: Script '{filename}' not found in '{script_dir}'.{Style.RESET}")
+            # Try legacy name fallback just in case file rename failed or is pending
+            legacy_map = {
+                "Deploy-SSH-Windows.ps1": "Deploy-Windows.ps1",
+                "Uninstall-SSH-Windows.ps1": "Uninstall-Windows.ps1",
+                "Deploy-SSH-Linux.sh": "Deploy-Linux.sh",
+                "Deploy-SSH-Mac.sh": "Deploy-Mac.sh"
+            }
+            if filename in legacy_map and os.path.exists(os.path.join(script_dir, legacy_map[filename])):
+                 shutil.copy2(os.path.join(script_dir, legacy_map[filename]), os.path.join(staging_dir, dest_name))
+            else:
+                 print(f"{Style.RED}❌ Error: Script '{filename}' not found in '{script_dir}'.{Style.RESET}")
 
     # Derive key name for documentation
     priv_key_name = f"id_ed25519_{device_name}_{final_user}"
@@ -845,19 +849,19 @@ IMPORTANT: SSH Keys authorize a specific USER account.
 1. Copy folder to target PC.
 2. Open PowerShell as Administrator.
 3. Run:
-   powershell -ExecutionPolicy Bypass -File .\\Deploy-OpenSSH.ps1 `
+   powershell -ExecutionPolicy Bypass -File .\\Deploy-SSH-Windows.ps1 `
      -KeysFile .\\{payload_name} `
      -DisablePasswordAuth
 
 [LINUX]
 1. Copy folder to target machine.
 2. Run:
-   sudo bash ./Deploy-Linux.sh
+   sudo bash ./Deploy-SSH-Linux.sh
 
 [MACOS]
 1. Copy folder to target Mac.
 2. Run:
-   sudo bash ./Deploy-Mac.sh
+   sudo bash ./Deploy-SSH-Mac.sh
 
 CLIENT SETUP (Connecting):
 --------------------------
@@ -868,9 +872,9 @@ CLIENT SETUP (Connecting):
 
 UNINSTALL:
 ----------
-Windows: powershell -File .\\Uninstall-OpenSSH.ps1
-Linux:   sudo apt remove openssh-server (or similar)
-MacOS:   sudo systemsetup -setremotelogin off
+Windows: powershell -File .\\Uninstall-SSH-Windows.ps1
+Linux:   sudo bash ./Uninstall-SSH-Linux.sh
+MacOS:   sudo bash ./Uninstall-SSH-Mac.sh
 """
     with open(os.path.join(staging_dir, "README_INSTALL.txt"), "w") as f:
         f.write(readme_content.strip())
@@ -917,9 +921,13 @@ def create_portable_wizard(output_dir):
     # Allowlist of files to include
     include_files = [
         "SSH_Key_Wizard.py",
-        "Deploy-OpenSSH.ps1",
-        "Uninstall-OpenSSH.ps1",
-        "Toggle-SSH.ps1",
+        "Deploy-SSH-Windows.ps1",
+        "Uninstall-SSH-Windows.ps1",
+        "Deploy-SSH-Linux.sh",
+        "Uninstall-SSH-Linux.sh",
+        "Deploy-SSH-Mac.sh",
+        "Uninstall-SSH-Mac.sh",
+        "Toggle-SSH-Windows.ps1",
         "README.md",
         "LICENSE"
     ]
@@ -928,6 +936,17 @@ def create_portable_wizard(output_dir):
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
             for filename in include_files:
                 src = os.path.join(script_dir, filename)
+                if not os.path.exists(src):
+                     # Legacy fallback
+                    legacy_map = {
+                        "Deploy-SSH-Windows.ps1": "Deploy-Windows.ps1",
+                        "Uninstall-SSH-Windows.ps1": "Uninstall-Windows.ps1",
+                        "Deploy-SSH-Linux.sh": "Deploy-Linux.sh",
+                        "Deploy-SSH-Mac.sh": "Deploy-Mac.sh"
+                    }
+                    if filename in legacy_map and os.path.exists(os.path.join(script_dir, legacy_map[filename])):
+                         src = os.path.join(script_dir, legacy_map[filename])
+                         
                 if os.path.exists(src):
                     zipf.write(src, filename)
                 else:
@@ -1325,71 +1344,80 @@ def main():
                     priv_path, pub_path = generate_key(final_user, device_name, default_dir)
 
                 if priv_path and pub_path:
-                    # Add to Payload
+                    # Add to Payload (Refactored)
                     payload_path = os.path.join(default_dir, "AuthorizedKeysPayload.txt")
-                    added = False
-                    
-                    print("\n" + f"{Style.BLUE}-{Style.RESET}" * 40)
-                    add_choice = get_input(f"Add to '{os.path.basename(payload_path)}'? (yes/no)", "yes")
-                    if add_choice.lower() in ['yes', 'y']:
-                        with open(pub_path, 'r') as f: pub_content = f.read().strip()
-                        
-                        # Smart Append: Check if user@host already exists
-                        import re
-                        new_comment = f"{final_user}@{device_name}"
-                        replaced_count = 0
-                        
-                        if os.path.exists(payload_path):
-                            with open(payload_path, 'r') as f: existing_lines = f.readlines()
-                            
-                            preserved_lines = []
-                            # Logic: If we find a key line with the SAME user@host comment, we skip it (remove it)
-                            # to replace it with the new one.
-                            for line in existing_lines:
-                                line = line.strip()
-                                if not line or line.startswith("#"): 
-                                    preserved_lines.append(line)
-                                    continue
-                                
-                                # Check comment
-                                parts = line.split()
-                                if len(parts) > 2:
-                                    current_comment = parts[-1] 
-                                    # Match user@host portion (ignore date suffix if present)
-                                    # Valid formats: user@host, user@host-2024-01-01
-                                    
-                                    # Extract base user@host
-                                    base_match = re.search(r'^([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+)', current_comment)
-                                    if base_match:
-                                        base_comment = base_match.group(1)
-                                        if base_comment == new_comment:
-                                            replaced_count += 1
-                                            continue # DROP this line (it's old)
-                                
-                                preserved_lines.append(line)
-                            
-                            # Write back purified list
-                            if replaced_count > 0:
-                                with open(payload_path, 'w') as f:
-                                    for l in preserved_lines: f.write(l + "\n")
-                                print(f"{Style.YELLOW}⚠️  Replaced {replaced_count} old key(s) for '{new_comment}'.{Style.RESET}")
+                    add_key_to_payload_interactive(payload_path, priv_path, pub_path, final_user, device_name)
 
-                        # Append New
-                        with open(payload_path, 'a') as f:
-                            f.write(f"\n# Key: {os.path.basename(priv_path)} ({final_user}@{device_name})\n")
-                            f.write(pub_content + "\n")
-                        
-                        added = True
-                        print_success("Added to Payload.")
-                    
-                    print_report_card(priv_path, pub_path, payload_path, added)
-                    get_input("Press Enter to return to main menu", allow_empty=True)
-                    
         except WizardExit:
              # Just loop back to main menu
              continue
 
+def add_key_to_payload_interactive(payload_path, priv_path, pub_path, final_user, device_name):
+    """
+    Handles the interactive process of adding a generated/imported key to the payload file.
+    Includes logic to replacing existing keys for the same user@host.
+    """
+    if not (priv_path and pub_path): return
 
+    print("\n" + f"{Style.BLUE}-{Style.RESET}" * 40)
+    add_choice = get_input(f"Add to '{os.path.basename(payload_path)}'? (yes/no)", "yes")
+    
+    added = False
+    if add_choice.lower() in ['yes', 'y']:
+        try:
+            with open(pub_path, 'r') as f: pub_content = f.read().strip()
+            
+            # Smart Append: Check if user@host already exists
+            import re
+            new_comment = f"{final_user}@{device_name}"
+            replaced_count = 0
+            
+            if os.path.exists(payload_path):
+                with open(payload_path, 'r') as f: existing_lines = f.readlines()
+                
+                preserved_lines = []
+                # Logic: If we find a key line with the SAME user@host comment, we skip it (remove it)
+                # to replace it with the new one.
+                for line in existing_lines:
+                    line = line.strip()
+                    if not line or line.startswith("#"): 
+                        preserved_lines.append(line)
+                        continue
+                    
+                    # Check comment
+                    parts = line.split()
+                    if len(parts) > 2:
+                        current_comment = parts[-1] 
+                        
+                        # Extract base user@host
+                        base_match = re.search(r'^([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+)', current_comment)
+                        if base_match:
+                            base_comment = base_match.group(1)
+                            if base_comment == new_comment:
+                                replaced_count += 1
+                                continue # DROP this line (it's old)
+                    
+                    preserved_lines.append(line)
+                
+                # Write back purified list
+                if replaced_count > 0:
+                    with open(payload_path, 'w') as f:
+                        for l in preserved_lines: f.write(l + "\n")
+                    print(f"{Style.YELLOW}⚠️  Replaced {replaced_count} old key(s) for '{new_comment}'.{Style.RESET}")
+
+            # Append New
+            with open(payload_path, 'a') as f:
+                f.write(f"\n# Key: {os.path.basename(priv_path)} ({final_user}@{device_name})\n")
+                f.write(pub_content + "\n")
+            
+            added = True
+            print_success("Added to Payload.")
+            
+        except Exception as e:
+            print_error(f"Failed to update payload: {e}")
+    
+    print_report_card(priv_path, pub_path, payload_path, added)
+    get_input("Press Enter to return to main menu", allow_empty=True)
 
 if __name__ == "__main__":
     main()

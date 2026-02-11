@@ -6,10 +6,10 @@ Deploy, manage, and secure **OpenSSH Server** on Windows 10/11 endpoints.
 
 | Script | Description |
 | :--- | :--- |
-| **[SSH_Key_Wizard.py](SSH_Key_Wizard.py)** | **(Admin Local)** Cross-platform Wizard. Generates secure Ed25519 keys, backs up old ones, and helps you organize them for deployment. |
-| **[Deploy-OpenSSH.ps1](Deploy-OpenSSH.ps1)** | **(Endpoint)** Installs OpenSSH, configures Port 22, deploys keys, and sets firewall rules. Logs to `C:\ProgramData\WINTOOLS\Logs`. |
-| **[Toggle-SSH.ps1](Toggle-SSH.ps1)** | **(Endpoint)** Quickly Enable/Disable SSH service. Supports Just-In-Time (JIT) access. |
-| **[Uninstall-OpenSSH.ps1](Uninstall-OpenSSH.ps1)** | **(Endpoint)** Completely removes OpenSSH (Service, Firewall, Keys). |
+| **[SSH_Key_Wizard.py](SSH_Key_Wizard.py)** | **(Admin Local)** Cross-platform Wizard. Generates secure Ed25519 keys, backs up old ones, and helps you organize them for deployment. **Now with improved sorting!** |
+| **[Deploy-SSH-Windows.ps1](Deploy-SSH-Windows.ps1)** | **(Endpoint)** Installs OpenSSH, configures Port 22, deploys keys, and sets firewall rules. Includes **Deep Diagnostics** for troubleshooting service failures. |
+| **[Toggle-SSH-Windows.ps1](Toggle-SSH-Windows.ps1)** | **(Endpoint)** Quickly Enable/Disable SSH service. Supports Just-In-Time (JIT) access. |
+| **[Uninstall-SSH-Windows.ps1](Uninstall-SSH-Windows.ps1)** | **(Endpoint)** Completely removes OpenSSH (Service, Firewall, Keys). |
 
 ## 🚀 Workflow
 
@@ -21,8 +21,7 @@ python SSH_Key_Wizard.py
 This generates your identity keys in `AuthorizedKeys/`.
 
 > [!TIP]
-> **New:** The wizard can now automatically create a `Deploy-Package-<device>.zip` containing all necessary scripts and keys. Just answer "Yes" when prompted!
-
+> **New:** The wizard prioritizes key sorting, placing any "Undated" or manually added keys at the top of the history list for easy review.
 
 ### Step 2: Client Setup (Where to put your keys?)
 You must have the **Private Key** on the computer you are connecting *from*.
@@ -37,129 +36,56 @@ You must have the **Private Key** on the computer you are connecting *from*.
 > On Mac/Linux, you must secure the key permissions: `chmod 600 ~/.ssh/id_ed25519`
 
 #### Managing Multiple Keys (Best Practice)
-If you have multiple keys (e.g., `id_ed25519_work`, `id_ed25519_personal`), do **not** rename them. instead, create a `~/.ssh/config` file:
+If the wizard generated a key like `id_ed25519_hostname_user`, SSH won't use it automatically. You must tell it to!
+Create or edit `~/.ssh/config`:
 
 ```text
 # ~/.ssh/config
-Host work-server
-    HostName 192.168.1.50
+Host my-server
+    HostName 10.0.0.190
     User admin
-    IdentityFile ~/.ssh/id_ed25519_work
+    IdentityFile ~/.ssh/id_ed25519_hostname_user
 
 Host home-pc
-    HostName 10.0.0.5
+    HostName 192.168.1.5
     User spencer
     IdentityFile ~/.ssh/id_ed25519_personal
 ```
-Now you can just type: `ssh work-server`
+Now you can just type: `ssh my-server`
 
 ### Step 3: Deploy
 
-
-You have two options for deployment:
-
 #### Option A: Manual Deployment (Small Scale)
-If you are setting up a few machines manually:
 1.  At the end of the Wizard, answer **Yes** to "Create Deployment Package?".
 2.  Copy the generated `Deploy-Package-<hostname>.zip` to the target machine.
 3.  Unzip it on the target machine.
-4.  Right-click `Deploy-OpenSSH.ps1` and select **Run with PowerShell**. 
+4.  Right-click `Deploy-SSH-Windows.ps1` and select **Run with PowerShell**. 
     *   *Alternatively, run as Admin:*
         ```powershell
-        powershell -ExecutionPolicy Bypass -File .\Deploy-OpenSSH.ps1 -KeysFile .\AuthorizedKeysPayload.txt -DisablePasswordAuth $true
+        powershell -ExecutionPolicy Bypass -File .\Deploy-SSH-Windows.ps1 -KeysFile .\AuthorizedKeysPayload.txt -DisablePasswordAuth
         ```
-
 
 #### Option B: Enterprise Deployment (Intune / Tanium)
-For mass deployment, push the `Deploy-OpenSSH.ps1` script and your master `AuthorizedKeysPayload.txt` to:
-*   `C:\ProgramData\WINTOOLS\Scripts` (or your preferred staging area).
-*   Run the script as **System** or **Administrator**.
-*   **Command Line:**
-    ```powershell
-    powershell -ExecutionPolicy Bypass -File .\Deploy-OpenSSH.ps1 -KeysFile .\AuthorizedKeysPayload.txt -DisablePasswordAuth $true
-    ```
-
-
-
-## 🌍 Multi-Device Strategy (Best Practice)
-
-If you manage servers from multiple computers (e.g., **Work Laptop** and **Home PC**), follow this strategy:
-
-## 🌍 Multi-Device Strategy (Best Practice)
-
-If you manage servers from multiple computers (e.g., **Work Laptop** and **Home PC**), follow this strategy:
-
-1.  **Run the Wizard on EACH Device**:
-    *   On **Work Laptop**: Run `SSH_Key_Wizard.py`. Name device `laptop-campus` (or use the auto-detected Smart ID like `mba2023-campus`).
-    *   On **Home PC**: Run `SSH_Key_Wizard.py`. Name device `desktop-wfh`.
-    *   *Note: Device names are strictly limited to alphanumeric characters and hyphens (a-z, 0-9, -) to ensure compatibility.*
-2.  **Consolidate the Payload**:
-    *   The Wizard creates an `AuthorizedKeysPayload.txt` on each machine.
-    *   **Combine them** into one master file.
-    *   *Tip: Use `AuthorizedKeysPayload.example.txt` as a reference template.*
-
-> [!CAUTION]
-> **ACCIDENTAL COPYING WARNING**
-> Do **NOT** copy the `SSH/` folder in its entirety to Endpoint PCs or unsecured locations.
-> - The `AuthorizedKeys/` folder contains your **Private Keys** (Secrets).
-> - The `History/` folder contains your **Archived Secrets**.
-> - **Only** deploy the `Deploy-OpenSSH.ps1` script and the `AuthorizedKeysPayload.txt` (Public Keys) to target machines.
-
-## 🔒 Security & Data Protection
-To prevent accidental data leaks, this project uses a "Local-Only" configuration model:
-
-*   **Automatic Protection**: The root `.gitignore` is configured to ignore all real keys (`*.key`, `*.pem`), the `AuthorizedKeys/` folder, and the production `AuthorizedKeysPayload.txt`.
-*   **Your Responsibility**:
-    *   **Real Data**: Edit `AuthorizedKeysPayload.txt` with your actual production keys. This file will be used during deployment but will stay local to your machine.
-    *   **Shareable Data**: Only edit and commit `AuthorizedKeysPayload.example.txt` if you need to demonstrate the format to others.
-
-> [!IMPORTANT]
-> **NEVER** force-add private keys to your repository. Always use the deployment script to transfer them securely.
-    *   Example Content:
-        ```text
-        # Key: id_ed25519_admin_work-laptop
-        ssh-ed25519 AAAAC3Nza... admin@work-laptop
-        # Key: id_ed25519_admin_home-pc
-        ssh-ed25519 AAAAC3Nza... admin@home-pc
-        ```
-3.  **Deploy Once**:
-    *   Use this master file with `Deploy-OpenSSH.ps1` on all your target servers.
-    *   Now both your Laptop and Home PC can access all servers! 🚀
-
-## 🔒 Security Best Practices
-
-1.  **Identity is the New Perimeter**:
-    *   **SSH**: Use **Ed25519 Keys** only. Disable Password Authentication (`-DisablePasswordAuth $true`).
-    *   **RDP**: Require **Network Level Authentication (NLA)** (Default on modern Windows).
-2.  **Standards**:
-    *   We recommend using **Standard Ports** (SSH: 22, RDP: 3389).
-    *   Use **Windows Firewall** to limit access to Admin Subnets.
+For mass deployment, push the `Deploy-SSH-Windows.ps1` script and your master `AuthorizedKeysPayload.txt` to `C:\ProgramData\WINTOOLS\Scripts`.
+Run as **System** or **Administrator**.
 
 ## ❓ Troubleshooting & FAQ
 
-### 1. Will this lock me out of the computer?
-**No.**
-*   The script only configures the **OpenSSH Server** application. It sets `PasswordAuthentication no` *only* for SSH connections.
-*   It does **not** affect local Windows logins, Remote Desktop (RDP), or other services.
-*   As long as you have local admin access (physical or RDP), you are safe.
+### 1. "Service terminated unexpectedly" / Failed to start?
+The `Deploy-SSH-Windows.ps1` script now includes **Deep Diagnostics**.
+If the service fails, the script will automatically:
+1.  Dump "Service Control Manager" errors from the System Event Log.
+2.  Attempt to run `sshd.exe -d` (Debug Mode) manually to catch permission errors.
 
-### 2. I can't SSH in! How do I fix it?
-If you lost your private key or the configuration is broken:
-1.  Log in to the machine via RDP or Console.
-2.  Run the **Uninstall Script**:
-    ```powershell
-    powershell -ExecutionPolicy Bypass -File .\Uninstall-OpenSSH.ps1
-    ```
-3.  This completely removes OpenSSH and its configuration. You can now start over.
+**Common Fix:** The script automatically fixes permissions on `C:\ProgramData\ssh`. If you still have issues, ensure the `SYSTEM` account has Full Control over this folder.
 
-### 3. "Permission denied (publickey)" or It Asks for a Password
-This means the server rejected your key. Common causes:
+### 2. "Permission denied (publickey)"?
+This means the server is running but rejected your key.
+1.  **Check Client Config**: Are you using the right private key? Use `ssh -v user@host` to see what key is being offered.
+2.  **Check Admin Status**: By default, `administrators_authorized_keys` is used. If you are logging in as a non-admin, you need to configure standard `authorized_keys`.
 
-1.  **Client doesn't know about the key**:
-    *   Did you move the key to `~/.ssh/`?
-    *   If not, you **MUST** use `ssh -i path/to/key user@host`.
-2.  **Wrong User**: Are you logging in as the user you generated the key for?
-3.  **Permissions (Mac/Linux)**:
-    *   Run `ls -l ~/.ssh/id_ed25519`.
-    *   It **must** be `-rw-------`. If not, run `chmod 600 ~/.ssh/id_ed25519`.
-4.  **Admin User**: Did you try to SSH as a non-admin? The default config limits access to the **Administrators** group.
+### 3. I can't SSH in! How do I fix it?
+If you lost access:
+1.  Log in via RDP/Console.
+2.  Run `powershell -ExecutionPolicy Bypass -File .\Uninstall-SSH-Windows.ps1`.
+3.  Re-run deployment.
