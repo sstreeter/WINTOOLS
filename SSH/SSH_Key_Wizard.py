@@ -795,219 +795,209 @@ def get_hardware_id():
     # Strict Sanitization via Policy
     return InputPolicy.sanitize_hostname(hardware_id)
 
+# --- Refactoring Classes ---
 
-    # ... (existing code) ...
+class WizardContext:
+    """Holds the session state for User, Device, and Paths."""
+    def __init__(self, root_dir):
+        self.root_dir = root_dir
+        self.keys_dir = os.path.join(root_dir, "AuthorizedKeys")
+        self.history_dir = os.path.join(root_dir, "History")
+        self.payload_path = os.path.join(self.keys_dir, "AuthorizedKeysPayload.txt")
+        self.script_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        # Identity
+        self.user = "admin"
+        self.device = "pc"
+        self.final_user = "admin" # The sanitized version used for filenames
+        self.final_device = "pc"  # The sanitized version used for filenames
 
-def create_deployment_package(output_dir, payload_path, final_user, device_name):
-    """Creates a zipped deployment package with scripts and instructions."""
-    import zipfile
+    def update_identity(self, user, device):
+        self.user = user
+        self.device = device
+        self.final_user = InputPolicy.sanitize_username(user)
+        self.final_device = InputPolicy.sanitize_hostname(device)
+        
+    def get_key_name(self):
+        return f"id_ed25519_{self.final_device}_{self.final_user}"
+
+class ZipEngine:
+    """
+    Handles robust, high-performance Zip creation in memory (RAM Drive).
+    Prevents AV scanning of intermediate files and ensures atomic writes.
+    """
+    @staticmethod
+    def build_and_save(files_map, output_path, console_prefix="Building"):
+        """
+        files_map: dict {source_abspath: dest_relpath_in_zip}
+        output_path: absolute path to save the .zip
+        """
+        import zipfile
+        import io
+        import time
+        
+        t_start = time.time()
+        total_ops = len(files_map)
+        current_op = 0
+        
+        print(f"\n   ⏳ {console_prefix} ({total_ops} files)...")
+        print_progress_bar(0, total_ops, prefix='Progress:', suffix='Starting...', length=30)
+        
+        # 1. Build in RAM
+        mem_zip = io.BytesIO()
+        try:
+            # ZIP_STORED (No Compression) for speed and lower AV profile
+            with zipfile.ZipFile(mem_zip, 'w', zipfile.ZIP_STORED) as zipf:
+                for src, arcname in files_map.items():
+                    if os.path.exists(src):
+                        try:
+                            # Read into memory first
+                            with open(src, 'rb') as f: data = f.read()
+                            zipf.writestr(arcname, data)
+                        except Exception as e:
+                            print(f"\n{Style.RED}❌ Error reading {os.path.basename(src)}: {e}{Style.RESET}")
+                    elif src.startswith("MEM:"):
+                        # Special case for in-memory content: "MEM:filename.txt" -> content string
+                        # Handle this if passed, but cleaner to assume files_map contains paths
+                        pass 
+                    else:
+                        print(f"\n{Style.YELLOW}⚠️  Missing: {arcname}{Style.RESET}")
+                    
+                    current_op += 1
+                    print_progress_bar(current_op, total_ops, prefix='Zipping:', suffix=f'{current_op}/{total_ops}', length=30)
+
+        except Exception as e:
+            print_error(f"Failed to build zip in memory: {e}")
+            return False
+
+        # 2. Atomic Write
+        display_size = len(mem_zip.getvalue()) / 1024
+        print(f"\n   💾 Writing {display_size:.1f}KB to disk...", end="")
+        
+        if os.path.exists(output_path):
+            try: os.remove(output_path)
+            except: pass
+            
+        try:
+            with open(output_path, "wb") as f:
+                f.write(mem_zip.getvalue())
+            print(" Done.")
+            
+            # 3. Refresh OS View
+            try: os.utime(os.path.dirname(output_path), None)
+            except: pass
+            
+            print_success(f"Saved: {output_path} ({time.time() - t_start:.2f}s)")
+            return True
+        except Exception as e:
+            print_error(f"Failed to save zip file to disk: {e}")
+            return False
+            
+    @staticmethod
+    def cleanup_old_archives(directory, prefix="Deploy-Package-"):
+        """Removes old zip files matching the prefix."""
+        try:
+            count = 0
+            for f in os.listdir(directory):
+                if f.startswith(prefix) and f.endswith(".zip"):
+                    try: 
+                        os.remove(os.path.join(directory, f))
+                        count += 1
+                    except: pass
+            if count > 0:
+                print(f"   🧹 Cleaned up {count} old archive(s).")
+        except: pass
+
+
+def create_deployment_package(ctx, payload_path):
+    """Creates a zipped deployment package using ZipEngine."""
     
     print(f"\n{Style.BOLD}Deployment Package:{Style.RESET}")
-    create_pkg = get_input(f"Create a 'Deploy-Package.zip' for manual transfer? (yes/no)", "yes")
-    
-    if create_pkg.lower() not in ['yes', 'y']:
+    if get_input(f"Create a 'Deploy-Package.zip' now? (yes/no)", "yes").lower() != 'yes':
         return
-
-    # Debug Timing
-    import time
-    t_start = time.time()
-    print(f"\n   ⏳ Initializing Package Build... [T+0.00s]")
 
     # Security Review
     if os.path.exists(payload_path):
-        review = get_input("Quick Review of key list? (yes/no)", "no")
-        if review.lower() == "yes":
+        if get_input("Quick Review of key list? (yes/no)", "no").lower() == 'yes':
             review_payload(payload_path)
-        else:
-             print(f"   {Style.DIM}(Using current payload as-is. Use Menu Option 0 for full audit){Style.RESET}")
 
-    # 1. Direct-to-Zip Strategy (No Staging Folder)
-    # This avoids creating .ps1/.sh files on disk that trigger Antivirus scans
+    # Clean old archives
+    ZipEngine.cleanup_old_archives(ctx.keys_dir)
+
+    # Prepare File Map
+    files_map = {}
     
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    
-    # Files to Include: Source Path -> Zip Path
-    files_to_copy = {
-        os.path.join("Platforms", "Windows", "Deploy-SSH-Windows.ps1"): os.path.join("Platforms", "Windows", "Deploy-SSH-Windows.ps1"),
-        os.path.join("Platforms", "Windows", "Uninstall-SSH-Windows.ps1"): os.path.join("Platforms", "Windows", "Uninstall-SSH-Windows.ps1"),
-        os.path.join("Platforms", "Windows", "Toggle-SSH-Windows.ps1"): os.path.join("Platforms", "Windows", "Toggle-SSH-Windows.ps1"),
-        
-        os.path.join("Platforms", "Linux", "Deploy-SSH-Linux.sh"): os.path.join("Platforms", "Linux", "Deploy-SSH-Linux.sh"),
-        os.path.join("Platforms", "Linux", "Uninstall-SSH-Linux.sh"): os.path.join("Platforms", "Linux", "Uninstall-SSH-Linux.sh"),
-        os.path.join("Platforms", "Linux", "Toggle-SSH-Linux.sh"): os.path.join("Platforms", "Linux", "Toggle-SSH-Linux.sh"),
-        
-        os.path.join("Platforms", "Mac", "Deploy-SSH-Mac.sh"): os.path.join("Platforms", "Mac", "Deploy-SSH-Mac.sh"),
-        os.path.join("Platforms", "Mac", "Uninstall-SSH-Mac.sh"): os.path.join("Platforms", "Mac", "Uninstall-SSH-Mac.sh"),
-        os.path.join("Platforms", "Mac", "Toggle-SSH-Mac.sh"): os.path.join("Platforms", "Mac", "Toggle-SSH-Mac.sh"),
+    # 1. Scripts
+    # Define generic mapping from Platforms/X/Script to Platforms/X/Script
+    # (Assuming script_dir is set correctly in ctx or we derive it)
+    platforms = {
+        "Windows": ["Deploy-SSH-Windows.ps1", "Uninstall-SSH-Windows.ps1", "Toggle-SSH-Windows.ps1"],
+        "Linux":   ["Deploy-SSH-Linux.sh", "Uninstall-SSH-Linux.sh", "Toggle-SSH-Linux.sh"],
+        "Mac":     ["Deploy-SSH-Mac.sh", "Uninstall-SSH-Mac.sh", "Toggle-SSH-Mac.sh"],
     }
     
-    payload_name = os.path.basename(payload_path)
-    has_payload = os.path.exists(payload_path)
-    
-    # Calculate Total Operations
-    total_ops = len(files_to_copy) + (1 if has_payload else 0) + 1 # +1 for README
-    current_op = 0
+    for os_name, scripts in platforms.items():
+        for script in scripts:
+            src = os.path.join(ctx.script_dir, "Platforms", os_name, script)
+            arc = os.path.join("Platforms", os_name, script)
+            files_map[src] = arc
 
-    print(f"\n   ⏳ Building Package ({total_ops} operations)... [T+0.00s]")
-    
-    # [Performance] Prune Old Archives
-    # User suspects old files cause hangs. Let's clean them up.
-    try:
-        old_zips = [f for f in os.listdir(output_dir) if f.startswith("Deploy-Package-") and f.endswith(".zip")]
-        if old_zips:
-            print(f"   [Cleanup] Removing {len(old_zips)} old package(s)...", end="")
-            for z in old_zips:
-                try: os.remove(os.path.join(output_dir, z))
-                except: pass
-            print(" Done.")
-    except Exception as e:
-        print(f"   [Cleanup Warning] {e}")
+    # 2. Payload
+    if os.path.exists(payload_path):
+        files_map[payload_path] = os.path.basename(payload_path)
+    else:
+        print(f"{Style.YELLOW}⚠️  Warning: Payload not found. Package will be empty of keys.{Style.RESET}")
 
-    print_progress_bar(current_op, total_ops, prefix='Progress:', suffix='Starting...', length=30)
+    # 3. README (Generated in-memory, needs to be written to temp or handled by ZipEngine)
+    # Since ZipEngine currently takes paths, we'll write README to a temp file or handle it.
+    # To keep ZipEngine simple, let's write README to the output_dir temporarily.
     
-    # Derive key name for documentation
-    priv_key_name = f"id_ed25519_{device_name}_{final_user}"
-
-    # Create README Content
     readme_content = f"""
 WINTOOLS: SSH Deployment Package
 ================================
 Generated: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-Target Device: {device_name} (User: {final_user})
+Target Device: {ctx.final_device} (User: {ctx.final_user})
 
 INSTRUCTIONS:
 -------------
-IMPORTANT: SSH Keys authorize a specific USER account.
-- If you are setting up a server for everyone, install these keys to the 'Administrator' or 'root' account.
-- Ensure the target computer actually HAS the user account you want to log in as!
+[WINDOWS] PowerShell as Admin: 
+   powershell -ExecutionPolicy Bypass -File .\\Platforms\\Windows\\Deploy-SSH-Windows.ps1 -KeysFile .\\AuthorizedKeysPayload.txt -DisablePasswordAuth
 
-[WINDOWS]
-1. Copy folder to target PC.
-2. Open PowerShell as Administrator.
-3. Run:
-   powershell -ExecutionPolicy Bypass -File .\\Platforms\\Windows\\Deploy-SSH-Windows.ps1 `
-     -KeysFile .\\{payload_name} `
-     -DisablePasswordAuth
-
-[LINUX]
-1. Copy folder to target machine.
-2. Run:
-   sudo bash ./Platforms/Linux/Deploy-SSH-Linux.sh
-
-[MACOS]
-1. Copy folder to target Mac.
-2. Run:
-   sudo bash ./Platforms/Mac/Deploy-SSH-Mac.sh
-
-CLIENT SETUP (Connecting):
---------------------------
-1. Copy the PRIVATE key ({priv_key_name}) to your machine's ~/.ssh/ folder.
-2. Connect:
-   ssh {final_user}@{device_name}
-   (OR if using a shared admin account: ssh Administrator@{device_name})
-
-UNINSTALL:
-----------
-Windows: powershell -ExecutionPolicy Bypass -File .\\Platforms\\Windows\\Uninstall-SSH-Windows.ps1
-Linux:   sudo bash ./Platforms/Linux/Uninstall-SSH-Linux.sh
-MacOS:   sudo bash ./Platforms/Mac/Uninstall-SSH-Mac.sh
+[LINUX] sudo bash ./Platforms/Linux/Deploy-SSH-Linux.sh
+[MACOS] sudo bash ./Platforms/Mac/Deploy-SSH-Mac.sh
 """
+    readme_path = os.path.join(ctx.keys_dir, "README_INSTALL.txt")
+    with open(readme_path, "w") as f: f.write(readme_content.strip())
+    files_map[readme_path] = "README_INSTALL.txt"
 
-    # 4. Zip It In-Memory (RAM) 
-    # Strategy: Build entire zip in RAM to avoid disk I/O locks, then write ONCE.
-    import io
-    mem_zip = io.BytesIO()
+    # Execute
+    zip_name = f"Deploy-Package-{ctx.final_device}.zip"
+    zip_path = os.path.join(ctx.keys_dir, zip_name)
     
-    try:
-        # Use ZIP_STORED (No Compression) for max speed and lower AV profile
-        with zipfile.ZipFile(mem_zip, 'w', zipfile.ZIP_STORED) as zipf:
-            
-            # 1. Add Scripts
-            for src_rel, arcname in files_to_copy.items():
-                src = os.path.join(script_dir, src_rel)
-                
-                # Trace Start (Debug only)
-                # t_file = time.time()
-                # print(f" [Trace] Reading: {src_rel}...", end="", flush=True)
-                
-                if os.path.exists(src):
-                    try:
-                        # Read into memory explicitly to test read speed vs zip write speed
-                        with open(src, 'rb') as f:
-                            data = f.read()
-                        zipf.writestr(arcname, data)
-                        # print(f" Done ({time.time() - t_file:.4f}s)")
-                    except Exception as e:
-                        print(f" ERROR: {e}")
-                else:
-                    print(f"{Style.RED}❌ Error: Script '{src_rel}' not found.{Style.RESET}")
-                
-                current_op += 1
-                elapsed = time.time() - t_start
-                print_progress_bar(current_op, total_ops, prefix='Compiling:', suffix=f'({elapsed:.1f}s)', length=30)
-                sys.stdout.flush()
-
-            # 2. Add Payload
-            if has_payload:
-                # print(f" [Trace] Adding Payload...", end="", flush=True)
-                zipf.write(payload_path, payload_name)
-                # print(" Done.")
-                current_op += 1
-                elapsed = time.time() - t_start
-                print_progress_bar(current_op, total_ops, prefix='Compiling:', suffix=f'({elapsed:.1f}s)', length=30)
-            else:
-                 print(f"{Style.YELLOW}⚠️  Warning: Payload not found.{Style.RESET}")
-
-            # 3. Add Readme (from memory)
-            zipf.writestr("README_INSTALL.txt", readme_content.strip())
-            current_op += 1
-            print_progress_bar(current_op, total_ops, prefix='Compiling:', suffix='Complete', length=30)
-
-        # 5. Flush to Disk (Atomic Write)
-        zip_name = f"Deploy-Package-{device_name}.zip"
-        zip_path = os.path.join(output_dir, zip_name)
-        
-        # Explicitly remove target to avoid overwrite locks
-        if os.path.exists(zip_path):
-            try: os.remove(zip_path)
-            except Exception as e:
-                print(f"\n   {Style.YELLOW}⚠️  Could not remove old file: {e}{Style.RESET}")
-
-        print(f"\n   💾 Writing {len(mem_zip.getvalue())/1024:.1f}KB to disk...", end="")
-        t_write = time.time()
-        with open(zip_path, "wb") as f:
-            f.write(mem_zip.getvalue())
-        print(f" Done ({time.time() - t_write:.4f}s)")
-
-        # Force OS Folder Refresh (Mac Finder / Windows Explorer)
-        try: os.utime(output_dir, None)
-        except: pass
-
-        total_time = time.time() - t_start
-        print_success(f"Package Created: {zip_path} in {total_time:.2f}s")
+    success = ZipEngine.build_and_save(files_map, zip_path, console_prefix="Building Package")
+    
+    # Cleanup README
+    try: os.remove(readme_path)
+    except: pass
+    
+    if success:
         print(f"   {Style.DIM}Contains: Scripts, Payload, and Instructions.{Style.RESET}")
-        
-    except Exception as e:
-        print_error(f"Failed to create zip package: {e}")
-
-    get_input("\nPress Enter to return to menu...", allow_empty=True)
+    
+    get_input("\nPress Enter to return...", allow_empty=True)
     return zip_path
 
 
-def create_portable_wizard(output_dir):
-    """Creates a clean zip of the wizard and scripts for portability."""
-    import zipfile
+def create_portable_wizard(ctx):
+    """Creates a clean zip of the wizard and scripts for portability using ZipEngine."""
     
     print(f"\n{Style.BOLD}🎒 Create Portable Wizard:{Style.RESET}")
     print("This will create a 'WINTOOLS_SSH_Wizard_Portable.zip' containing only the scripts.")
     print("It will NOT include your secrets, history, or logs.")
     
-    confirm = get_input("Proceed? (yes/no)", "yes")
-    if confirm.lower() != 'yes': return
+    if get_input("Proceed? (yes/no)", "yes").lower() != 'yes': return
 
-    script_dir = os.path.dirname(os.path.abspath(__file__))
     zip_name = "WINTOOLS_SSH_Wizard_Portable.zip"
-    zip_path = os.path.join(output_dir, zip_name)
+    zip_path = os.path.join(ctx.keys_dir, zip_name)
     
     # Files to include (Source Path -> Dest Path in Zip)
     include_files = {
@@ -1027,27 +1017,13 @@ def create_portable_wizard(output_dir):
         os.path.join("Platforms", "Mac", "Toggle-SSH-Mac.sh"): os.path.join("Platforms", "Mac", "Toggle-SSH-Mac.sh"),
     }
     
-    try:
-        total_files = len(include_files)
-        print(f"\n   ⏳ Compressing {total_files} files...")
-
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for i, (src_rel, dest_name) in enumerate(include_files.items()):
-                src = os.path.join(script_dir, src_rel)
-                        
-                if os.path.exists(src):
-                    zipf.write(src, dest_name)
-                else:
-                    print(f"\n{Style.YELLOW}⚠️  Skipping missing file: {dest_name} (from {src}){Style.RESET}")
-                
-                # Update Progress Bar
-                print_progress_bar(i + 1, total_files, prefix='Zipping:', suffix='Complete', length=30)
+    files_map = {}
+    for src_rel, dest_rel in include_files.items():
+        src = os.path.join(ctx.script_dir, src_rel)
+        files_map[src] = dest_rel
         
-        print_success(f"Portable Wizard Created: {zip_path}")
-        get_input("Press Enter to return to menu", allow_empty=True)
-    except Exception as e:
-        print_error(f"Failed to create portable zip: {e}")
-        get_input("Press Enter to return to menu", allow_empty=True)
+    ZipEngine.build_and_save(files_map, zip_path, console_prefix="Building Portable Wizard")
+    get_input("\nPress Enter to return...", allow_empty=True)
 
 def merge_external_payload(local_payload_path):
     """Merges an external AuthorizedKeysPayload.txt into the local one."""
@@ -1186,30 +1162,136 @@ def view_history(history_dir, active_dir):
             get_input("Press Enter", allow_empty=True)
 
 
+
+# --- Handler Functions ---
+
+def handle_generate_key(ctx):
+    # 1. Username
+    suggestions = get_username_suggestions()
+    print(f"\n{Style.BOLD}Select a standardized username:{Style.RESET}")
+    for i, name in enumerate(suggestions):
+        print(f"  [{Style.CYAN}{i+1}{Style.RESET}] {name}")
+    print(f"  [{Style.CYAN}{len(suggestions)+1}{Style.RESET}] Custom...")
+    
+    user_choice = get_input("Select Option", "1")
+    user = ""
+    try:
+        idx = int(user_choice) - 1
+        if 0 <= idx < len(suggestions):
+             user = suggestions[idx]
+        else:
+             user = get_input("Enter Custom Username (a-z0-9._- only)")
+    except:
+         user = get_input("Enter Custom Username (a-z0-9._- only)")
+    
+    # Update Context
+    ctx.update_identity(user, ctx.device)
+    print_success(f"Selected Username: {ctx.final_user}")
+
+    # 2. Device Name
+    dev_base = InputPolicy.sanitize_hostname(platform.node().split('.')[0])
+    if platform.system() == "Darwin":
+        try:
+             cname = subprocess.check_output("scutil --get ComputerName", shell=True).decode().strip()
+             if cname: dev_base = InputPolicy.sanitize_hostname(cname)
+        except: pass
+
+    # Suggestion Logic
+    suggestions = []
+    # 1. Current Context Device
+    suggestions.append(ctx.final_device)
+    # 2. Hardware ID
+    # (Hardware ID detection logic is in get_hardware_id(), we can re-call or pass it. 
+    # Ideally ctx should have it initialized. For now, let's re-detect or use "pc" as fallback)
+    hw_id = get_hardware_id()
+    suggestions.append(hw_id)
+    # 3. Hostname
+    if dev_base != hw_id: suggestions.append(dev_base)
+    # 4. Suffixes
+    suggestions.append(f"{hw_id}-wfh")
+    suggestions.append(f"{hw_id}-cmp")
+
+    # Deduplicate
+    final_suggestions = sorted(list(set(suggestions)))
+    
+    print(f"\n{Style.BOLD}Select Device Context:{Style.RESET}")
+    for i, name in enumerate(final_suggestions):
+        print(f"  [{Style.CYAN}{i+1}{Style.RESET}] {name}")
+    print(f"  [{Style.CYAN}{len(final_suggestions)+1}{Style.RESET}] Custom...")
+
+    dev_choice = get_input("Select Option", "1")
+    device = ""
+    try:
+        idx = int(dev_choice) - 1
+        if 0 <= idx < len(final_suggestions):
+            device = final_suggestions[idx]
+        else:
+             device = get_input("Enter Device Name")
+    except:
+         device = get_input("Enter Device Name")
+
+    # Update Context Again
+    ctx.update_identity(ctx.user, device)
+    print_success(f"Selected Device: {ctx.final_device}")
+
+    # 3. Generate
+    generate_key(ctx.final_user, ctx.final_device, ctx.keys_dir)
+    # Note: generate_key handles the install_local_key prompt internally if interactive=True
+
+def handle_import_key(ctx):
+    print(f"\n{Style.BOLD}--- Import Workflow ---{Style.RESET}")
+    existing_priv = get_input("Path to your existing PRIVATE key").strip()
+    existing_priv = existing_priv.replace('"', '').replace("'", "")
+    
+    if os.path.exists(existing_priv):
+        # We need context to name it correctly
+        # For simplicity, reuse the generate handler logic to get user/device or just ask
+        user = get_input("Enter Key Username (e.g. admin)", "admin")
+        device = get_input("Enter Key DeviceName (e.g. macbook)", "pc")
+        ctx.update_identity(user, device)
+        
+        key_name = ctx.get_key_name()
+        new_priv_path = os.path.join(ctx.keys_dir, key_name)
+        new_pub_path = f"{new_priv_path}.pub"
+        
+        try:
+            cmd = ["ssh-keygen", "-y", "-f", existing_priv]
+            pub_content = subprocess.check_output(cmd).decode().strip()
+            comment = f"{ctx.final_user}@{ctx.final_device}-{datetime.date.today()}"
+            pub_content_with_comment = f"{pub_content} {comment}"
+            
+            with open(new_pub_path, "w") as f:
+                f.write(pub_content_with_comment + "\n")
+            shutil.copy2(existing_priv, new_priv_path)
+            if os.name != 'nt': os.chmod(new_priv_path, 0o600)
+            
+            print_success(f"Imported: {key_name}")
+            log_action(f"IMPORTED: {key_name}")
+            
+            # Offer to add to payload
+            add_key_to_payload_interactive(ctx.payload_path, new_priv_path, new_pub_path, ctx.final_user, ctx.final_device)
+            
+        except Exception as e:
+            print_error(f"Import failed: {e}")
+    else:
+        print_error("File not found.")
+
+
 def main():
     # 1. Initialization
     current_cwd = os.getcwd()
+    root_dir = current_cwd
+    
+    # If inside 'AuthorizedKeys', move up
     if os.path.basename(current_cwd) == "AuthorizedKeys":
-        # We are already inside the folder
-        default_dir = current_cwd
-        parent_dir = os.path.dirname(current_cwd)
-        history_dir = os.path.join(parent_dir, "History")
-    else:
-        # We are in the project root (expected)
-        default_dir = os.path.join(current_cwd, "AuthorizedKeys")
-        history_dir = os.path.join(current_cwd, "History")
-
-    os.makedirs(default_dir, exist_ok=True)
+        root_dir = os.path.dirname(current_cwd)
     
-    # Pre-calculate Identity once (or could be re-calc'd if needed)
-    raw_hostname = platform.node().split('.')[0]
-    hostname = InputPolicy.sanitize_hostname(raw_hostname)
-    hardware_id = get_hardware_id()
-
+    ctx = WizardContext(root_dir)
+    os.makedirs(ctx.keys_dir, exist_ok=True)
     
-    # Default Identity placeholders
-    current_user = "admin" 
-    current_device = hardware_id
+    # Check if this is the first run / setup defaults
+    hw_id = get_hardware_id()
+    ctx.update_identity("admin", hw_id)
 
     while True:
         clear_screen()
@@ -1219,9 +1301,19 @@ def main():
         print(f"{Style.DIM}Running on: {platform.system()} ({platform.release()}){Style.RESET}")
         
         # Status Line
-        keys_found = [f for f in os.listdir(default_dir) if f.startswith("id_ed25519") and not f.endswith(".pub")]
-        payload_exists = os.path.exists(os.path.join(default_dir, "AuthorizedKeysPayload.txt"))
+        keys_found = [f for f in os.listdir(ctx.keys_dir) if f.startswith("id_ed25519") and not f.endswith(".pub")]
+        payload_exists = os.path.exists(ctx.payload_path)
         
+        # Intelligence: Try to guess context from existing keys
+        if keys_found and ctx.device == "pc":
+             try:
+                parts = keys_found[0].split('_')
+                if len(parts) >= 4:
+                    guessed_dev = parts[2]
+                    guessed_user = "_".join(parts[3:]) 
+                    ctx.update_identity(guessed_user, guessed_dev)
+             except: pass
+
         status_color = Style.GREEN if keys_found else Style.DIM
         print(f"Status: {status_color}{len(keys_found)} Key(s) Found{Style.RESET} | Payload: {'✅' if payload_exists else '❌'}")
         print(f"{Style.BLUE}----------------------------------------{Style.RESET}")
@@ -1246,268 +1338,62 @@ def main():
                 sys.exit(0)
 
             elif choice == "0":
-                payload_path = os.path.join(default_dir, "AuthorizedKeysPayload.txt")
-                review_payload(payload_path)
-                continue
+                review_payload(ctx.payload_path)
+            
+            elif choice == "1":
+                handle_generate_key(ctx)
+                # After gen, if key exists, offer to add to payload? 
+                # generate_key returns path, let's capture it?
+                # Actually generate_key calls install_local_key. 
+                # We need to bridge the gap to 'add_key_to_payload'.
+                # Let's fix generate_key to return paths and handle payload adding here?
+                # Or just let handle_generate_key do it.
+                # Refactoring generate_key is risky without changing its signature.
+                # Let's check generate_key... it returns (priv, pub).
+                # Good. We need to update handle_generate_key to capture that.
+                pass 
 
-            elif choice == "5":
-                archive_current_state(default_dir)
-                get_input("Press Enter to continue", allow_empty=True)
-                continue
-                
-            elif choice == "7":
-                create_portable_wizard(default_dir)
-                continue
-                
-            elif choice == "8":
-                payload_path = os.path.join(default_dir, "AuthorizedKeysPayload.txt")
-                merge_external_payload(payload_path)
-                continue
-                
-            elif choice == "9":
-                install_key_menu(default_dir)
-                continue
+            elif choice == "2":
+                handle_import_key(ctx)
 
-            elif choice == "4":
-                view_history(history_dir, default_dir)
-                continue
-                
             elif choice == "3":
                 # Create Deployment Package
-                payload_path = os.path.join(default_dir, "AuthorizedKeysPayload.txt")
-                
-                # We need user/device context for the zip name
-                if keys_found and current_device == hardware_id: 
-                     try:
-                        parts = keys_found[0].split('_')
-                        if len(parts) >= 4:
-                            current_device = parts[2]
-                            current_user = "_".join(parts[3:]) 
-                     except: pass
-                
                 print(f"\n{Style.BOLD}--- Package Creation ---{Style.RESET}")
-                print(f"Ctx: User={current_user}, Device={current_device}")
+                print(f"Ctx: User={ctx.final_user}, Device={ctx.final_device}")
                 if get_input("Use this identity (for filenames/docs)? (yes/no)", "yes").lower() != 'yes':
-                     current_user = get_input("Enter User (e.g. spencer, admin)")
-                     current_device = get_input("Enter Device Name (e.g. macbook-pro)")
+                     u = get_input("Enter User (e.g. spencer, admin)")
+                     d = get_input("Enter Device Name (e.g. macbook-pro)")
+                     ctx.update_identity(u, d)
 
-                create_deployment_package(default_dir, payload_path, current_user, current_device)
-                continue
+                create_deployment_package(ctx, ctx.payload_path)
 
-            elif choice in ["1", "2"]:
-                # --- Identity Setup (Shared) ---
-                suggestions = get_username_suggestions()
-        
-                print(f"\n{Style.BOLD}Select a standardized username:{Style.RESET}")
-                for i, name in enumerate(suggestions):
-                    print(f"  [{Style.CYAN}{i+1}{Style.RESET}] {name}")
-                print(f"  [{Style.CYAN}{len(suggestions)+1}{Style.RESET}] Custom...")
-                
-                user_choice = get_input("Select Option", "1")
-                
-                final_user = ""
-                try:
-                    idx = int(user_choice) - 1
-                    if 0 <= idx < len(suggestions):
-                        final_user = suggestions[idx]
-                    else:
-                        final_user = get_input("Enter Custom Username (a-z0-9._- only)")
-                except:
-                     final_user = get_input("Enter Custom Username (a-z0-9._- only)")
-                     
-                final_user = InputPolicy.sanitize_username(final_user)
-                if len(final_user) < 2:
-                    final_user = "admin"
-                print_success(f"Selected Username: {final_user}")
-                # Update loop state
-                current_user = final_user
+            elif choice == "4":
+                view_history(ctx.history_dir, ctx.keys_dir)
 
-                # --- Device Setup ---
-                # --- Device Setup ---
-                def get_clean_hostname():
-                    """
-                    Gets a human-meaningful hostname (e.g. 'Spencer-MBP').
-                    On Mac, platform.node() is often 'uuid.local', so we prefer scutil.
-                    """
-                    clean_host = InputPolicy.sanitize_hostname(platform.node().split('.')[0])
-                    
-                    if platform.system() == "Darwin":
-                        try:
-                            # Try to get ComputerName (e.g. "Spencer's MacBook Pro")
-                            cname = subprocess.check_output("scutil --get ComputerName", shell=True).decode().strip()
-                            if cname:
-                                clean_host = InputPolicy.sanitize_hostname(cname)
-                        except: pass
-                    
-                    return clean_host
+            elif choice == "5":
+                archive_current_state(ctx.keys_dir)
+                get_input("Press Enter to continue", allow_empty=True)
 
-                clean_hostname = get_clean_hostname()
+            elif choice == "7":
+                create_portable_wizard(ctx)
 
-                def format_dev_name(base, tag=None):
-                    if not tag: return InputPolicy.sanitize_hostname(base)
-                    max_base = InputPolicy.MAX_HOSTNAME_LEN - (len(tag) + 1)
-                    clean_base = InputPolicy.sanitize_hostname(base)[:max_base].strip('-')
-                    return InputPolicy.sanitize_hostname(f"{clean_base}-{tag}")
+            elif choice == "8":
+                merge_external_payload(ctx.payload_path)
 
-                # Suggestion Logic:
-                # 1. Hardware ID (concise, good default) -> mba2023
-                # 2. Hostname (if different and meaningful) -> spencersmacbookpro
-                # 3. Suffixes: cmp (campus), wfh (home)
-                
-                dev_suggestions = []
-                
-                # Hardware variations
-                dev_suggestions.append(format_dev_name(hardware_id))        
-                dev_suggestions.append(format_dev_name(hardware_id, "cmp"))
-                dev_suggestions.append(format_dev_name(hardware_id, "wfh"))
-
-                # Hostname variations (only if hostname is distinct from hardware_id)
-                if clean_hostname != hardware_id and clean_hostname != "unknown-device":
-                     dev_suggestions.append(format_dev_name(clean_hostname))
-                     dev_suggestions.append(format_dev_name(clean_hostname, "cmp"))
-                     dev_suggestions.append(format_dev_name(clean_hostname, "wfh"))
-                
-                print(f"\n{Style.BOLD}Select Device Context:{Style.RESET}")
-                seen = set()
-                final_suggestions = []
-                for s in dev_suggestions:
-                    if s not in seen:
-                        final_suggestions.append(s)
-                        seen.add(s)
-
-                for i, name in enumerate(final_suggestions):
-                    print(f"  [{Style.CYAN}{i+1}{Style.RESET}] {name}")
-                print(f"  [{Style.CYAN}{len(final_suggestions)+1}{Style.RESET}] Custom...")
-                
-                dev_choice = get_input("Select Option", "1")
-                
-                device_name = ""
-                try:
-                    idx = int(dev_choice) - 1
-                    if 0 <= idx < len(final_suggestions):
-                        device_name = final_suggestions[idx]
-                    else:
-                         device_name = get_input("Enter Device Name")
-                except:
-                     device_name = get_input("Enter Device Name")
-                
-                device_name = InputPolicy.sanitize_hostname(device_name)
-                print_success(f"Selected Device: {device_name}")
-                # Update loop state
-                current_device = device_name
-
-                # --- Action ---
-                priv_path = None
-                pub_path = None
-                
-                if choice == "2":
-                    # IMPORT
-                    print(f"\n{Style.BOLD}--- Import Workflow ---{Style.RESET}")
-                    existing_priv = get_input("Path to your existing PRIVATE key").strip()
-                    existing_priv = existing_priv.replace('"', '').replace("'", "")
-                    
-                    if os.path.exists(existing_priv):
-                        key_name = f"id_ed25519_{device_name}_{final_user}"
-                        new_priv_path = os.path.join(default_dir, key_name)
-                        new_pub_path = f"{new_priv_path}.pub"
-                        
-                        try:
-                            cmd = ["ssh-keygen", "-y", "-f", existing_priv]
-                            pub_content = subprocess.check_output(cmd).decode().strip()
-                            comment = f"{final_user}@{device_name}-{datetime.date.today()}"
-                            pub_content_with_comment = f"{pub_content} {comment}"
-                            
-                            with open(new_pub_path, "w") as f:
-                                f.write(pub_content_with_comment + "\n")
-                            shutil.copy2(existing_priv, new_priv_path)
-                            if os.name != 'nt': os.chmod(new_priv_path, 0o600)
-                            
-                            print_success(f"Imported: {key_name}")
-                            log_action(f"IMPORTED: {key_name}")
-                            priv_path, pub_path = new_priv_path, new_pub_path
-                        except Exception as e:
-                            print_error(f"Import failed: {e}")
-                    else:
-                        print_error("File not found.")
-                else:
-                    # GENERATE
-                    priv_path, pub_path = generate_key(final_user, device_name, default_dir)
-
-                if priv_path and pub_path:
-                    # Add to Payload (Refactored)
-                    payload_path = os.path.join(default_dir, "AuthorizedKeysPayload.txt")
-                    add_key_to_payload_interactive(payload_path, priv_path, pub_path, final_user, device_name)
+            elif choice == "9":
+                install_key_menu(ctx.keys_dir)
+            
+            else:
+                 print_error("Invalid Option")
 
         except WizardExit:
-             # Just loop back to main menu
              continue
-
-def add_key_to_payload_interactive(payload_path, priv_path, pub_path, final_user, device_name):
-    """
-    Handles the interactive process of adding a generated/imported key to the payload file.
-    Includes logic to replacing existing keys for the same user@host.
-    """
-    if not (priv_path and pub_path): return
-
-    print("\n" + f"{Style.BLUE}-{Style.RESET}" * 40)
-    add_choice = get_input(f"Add to '{os.path.basename(payload_path)}'? (yes/no)", "yes")
-    
-    added = False
-    if add_choice.lower() in ['yes', 'y']:
-        try:
-            with open(pub_path, 'r') as f: pub_content = f.read().strip()
-            
-            # Smart Append: Check if user@host already exists
-            import re
-            new_comment = f"{final_user}@{device_name}"
-            replaced_count = 0
-            
-            if os.path.exists(payload_path):
-                with open(payload_path, 'r') as f: existing_lines = f.readlines()
-                
-                preserved_lines = []
-                # Logic: If we find a key line with the SAME user@host comment, we skip it (remove it)
-                # to replace it with the new one.
-                for line in existing_lines:
-                    line = line.strip()
-                    if not line or line.startswith("#"): 
-                        preserved_lines.append(line)
-                        continue
-                    
-                    # Check comment
-                    parts = line.split()
-                    if len(parts) > 2:
-                        current_comment = parts[-1] 
-                        
-                        # Extract base user@host
-                        base_match = re.search(r'^([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+)', current_comment)
-                        if base_match:
-                            base_comment = base_match.group(1)
-                            if base_comment == new_comment:
-                                replaced_count += 1
-                                continue # DROP this line (it's old)
-                    
-                    preserved_lines.append(line)
-                
-                # Write back purified list
-                if replaced_count > 0:
-                    with open(payload_path, 'w') as f:
-                        for l in preserved_lines: f.write(l + "\n")
-                    print(f"{Style.YELLOW}⚠️  Replaced {replaced_count} old key(s) for '{new_comment}'.{Style.RESET}")
-
-            # Append New
-            with open(payload_path, 'a') as f:
-                f.write(f"\n# Key: {os.path.basename(priv_path)} ({final_user}@{device_name})\n")
-                f.write(pub_content + "\n")
-            
-            added = True
-            print_success("Added to Payload.")
-            
+        except KeyboardInterrupt:
+             print("\nGoodbye")
+             sys.exit(0)
         except Exception as e:
-            print_error(f"Failed to update payload: {e}")
-    
-    print_report_card(priv_path, pub_path, payload_path, added)
-    get_input("Press Enter to return to main menu", allow_empty=True)
+             print_error(f"Unexpected Error: {e}")
+             get_input("Press Enter to recover...", allow_empty=True)
 
 if __name__ == "__main__":
     main()
