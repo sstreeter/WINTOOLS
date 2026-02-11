@@ -926,9 +926,9 @@ MacOS:   sudo bash ./Platforms/Mac/Uninstall-SSH-Mac.sh
             for src_rel, arcname in files_to_copy.items():
                 src = os.path.join(script_dir, src_rel)
                 
-                # Trace Start
-                t_file = time.time()
-                print(f" [Trace] Reading: {src_rel}...", end="", flush=True)
+                # Trace Start (Debug only)
+                # t_file = time.time()
+                # print(f" [Trace] Reading: {src_rel}...", end="", flush=True)
                 
                 if os.path.exists(src):
                     try:
@@ -936,7 +936,7 @@ MacOS:   sudo bash ./Platforms/Mac/Uninstall-SSH-Mac.sh
                         with open(src, 'rb') as f:
                             data = f.read()
                         zipf.writestr(arcname, data)
-                        print(f" Done ({time.time() - t_file:.4f}s)")
+                        # print(f" Done ({time.time() - t_file:.4f}s)")
                     except Exception as e:
                         print(f" ERROR: {e}")
                 else:
@@ -949,9 +949,9 @@ MacOS:   sudo bash ./Platforms/Mac/Uninstall-SSH-Mac.sh
 
             # 2. Add Payload
             if has_payload:
-                print(f" [Trace] Adding Payload...", end="", flush=True)
+                # print(f" [Trace] Adding Payload...", end="", flush=True)
                 zipf.write(payload_path, payload_name)
-                print(" Done.")
+                # print(" Done.")
                 current_op += 1
                 elapsed = time.time() - t_start
                 print_progress_bar(current_op, total_ops, prefix='Compiling:', suffix=f'({elapsed:.1f}s)', length=30)
@@ -978,6 +978,10 @@ MacOS:   sudo bash ./Platforms/Mac/Uninstall-SSH-Mac.sh
         with open(zip_path, "wb") as f:
             f.write(mem_zip.getvalue())
         print(f" Done ({time.time() - t_write:.4f}s)")
+
+        # Force OS Folder Refresh (Mac Finder / Windows Explorer)
+        try: os.utime(output_dir, None)
+        except: pass
 
         total_time = time.time() - t_start
         print_success(f"Package Created: {zip_path} in {total_time:.2f}s")
