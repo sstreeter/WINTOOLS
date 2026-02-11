@@ -89,5 +89,5 @@ This means the server is running but rejected your key.
 ### 3. I can't SSH in! How do I fix it?
 If you lost access:
 1.  Log in via RDP/Console.
-2.  Run `powershell -ExecutionPolicy Bypass -File .\Uninstall-SSH-Windows.ps1`.
+2.  Run `powershell -ExecutionPolicy Bypass -File .\Platforms\Windows\Uninstall-SSH-Windows.ps1`.
 3.  Re-run deployment.

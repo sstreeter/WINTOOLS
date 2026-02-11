@@ -895,7 +895,7 @@ CLIENT SETUP (Connecting):
 
 UNINSTALL:
 ----------
-Windows: powershell -File .\\Platforms\\Windows\\Uninstall-SSH-Windows.ps1
+Windows: powershell -ExecutionPolicy Bypass -File .\\Platforms\\Windows\\Uninstall-SSH-Windows.ps1
 Linux:   sudo bash ./Platforms/Linux/Uninstall-SSH-Linux.sh
 MacOS:   sudo bash ./Platforms/Mac/Uninstall-SSH-Mac.sh
 """
