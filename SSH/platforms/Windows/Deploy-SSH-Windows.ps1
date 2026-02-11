@@ -123,7 +123,7 @@ function Update-Config {
     $pwdValue = if ($DisablePwdAuth) { 'no' } else { 'yes' }
 
     if (-not (Test-Path $ConfigPath)) {
-        Write-Warning "sshd_config not found → creating minimal config"
+        Write-Warning "sshd_config not found -> creating minimal config"
         @(
             "Port $Port",
             "PubkeyAuthentication yes",
