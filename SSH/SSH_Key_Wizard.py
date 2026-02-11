@@ -923,11 +923,13 @@ def create_portable_wizard(output_dir):
         "SSH_Key_Wizard.py",
         "Deploy-SSH-Windows.ps1",
         "Uninstall-SSH-Windows.ps1",
+        "Toggle-SSH-Windows.ps1",
         "Deploy-SSH-Linux.sh",
         "Uninstall-SSH-Linux.sh",
+        "Toggle-SSH-Linux.sh",
         "Deploy-SSH-Mac.sh",
         "Uninstall-SSH-Mac.sh",
-        "Toggle-SSH-Windows.ps1",
+        "Toggle-SSH-Mac.sh",
         "README.md",
         "LICENSE"
     ]
