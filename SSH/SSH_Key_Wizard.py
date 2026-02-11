@@ -822,16 +822,9 @@ def create_deployment_package(output_dir, payload_path, final_user, device_name)
              print(f"   {Style.DIM}(Using current payload as-is. Use Menu Option 0 for full audit){Style.RESET}")
 
     # 1. Prepare Staging Area
-    staging_dir = os.path.join(output_dir, "Deploy_Package_Staging")
-    
-    # Log initial cleanup (suspect area)
-    if os.path.exists(staging_dir):
-        st = time.time()
-        print(f"   [Debug] Clearing old staging area... ({st - t_start:.2f}s)")
-        shutil.rmtree(staging_dir)
-        print(f"   [Debug] Validating cleanup... (+{time.time() - st:.2f}s)")
-        
-    os.makedirs(staging_dir)
+    import tempfile
+    staging_dir = tempfile.mkdtemp(prefix="Deploy_Staging_")
+    print(f"   [Debug] Using temporary staging: {staging_dir}")
     
     script_dir = os.path.dirname(os.path.abspath(__file__))
     
