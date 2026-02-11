@@ -790,13 +790,17 @@ def create_deployment_package(output_dir, payload_path, final_user, device_name)
     script_dir = os.path.dirname(os.path.abspath(__file__))
     
     # 2. Copy Scripts
+    # Key = Source (Relative to script_dir), Value = Dest (In Zip/Staging)
     files_to_copy = {
-        "Deploy-SSH-Windows.ps1": "Deploy-SSH-Windows.ps1",
-        "Uninstall-SSH-Windows.ps1": "Uninstall-SSH-Windows.ps1",
-        "Deploy-SSH-Linux.sh": "Deploy-SSH-Linux.sh",
-        "Uninstall-SSH-Linux.sh": "Uninstall-SSH-Linux.sh",
-        "Deploy-SSH-Mac.sh": "Deploy-SSH-Mac.sh",
-        "Uninstall-SSH-Mac.sh": "Uninstall-SSH-Mac.sh",
+        os.path.join("platforms", "Windows", "Deploy-SSH-Windows.ps1"): "Deploy-SSH-Windows.ps1",
+        os.path.join("platforms", "Windows", "Uninstall-SSH-Windows.ps1"): "Uninstall-SSH-Windows.ps1",
+        os.path.join("platforms", "Windows", "Toggle-SSH-Windows.ps1"): "Toggle-SSH-Windows.ps1",
+        os.path.join("platforms", "Linux", "Deploy-SSH-Linux.sh"): "Deploy-SSH-Linux.sh",
+        os.path.join("platforms", "Linux", "Uninstall-SSH-Linux.sh"): "Uninstall-SSH-Linux.sh",
+        os.path.join("platforms", "Linux", "Toggle-SSH-Linux.sh"): "Toggle-SSH-Linux.sh",
+        os.path.join("platforms", "Mac", "Deploy-SSH-Mac.sh"): "Deploy-SSH-Mac.sh",
+        os.path.join("platforms", "Mac", "Uninstall-SSH-Mac.sh"): "Uninstall-SSH-Mac.sh",
+        os.path.join("platforms", "Mac", "Toggle-SSH-Mac.sh"): "Toggle-SSH-Mac.sh",
     }
     
     payload_name = os.path.basename(payload_path)
@@ -918,41 +922,31 @@ def create_portable_wizard(output_dir):
     zip_name = "WINTOOLS_SSH_Wizard_Portable.zip"
     zip_path = os.path.join(output_dir, zip_name)
     
-    # Allowlist of files to include
-    include_files = [
-        "SSH_Key_Wizard.py",
-        "Deploy-SSH-Windows.ps1",
-        "Uninstall-SSH-Windows.ps1",
-        "Toggle-SSH-Windows.ps1",
-        "Deploy-SSH-Linux.sh",
-        "Uninstall-SSH-Linux.sh",
-        "Toggle-SSH-Linux.sh",
-        "Deploy-SSH-Mac.sh",
-        "Uninstall-SSH-Mac.sh",
-        "Toggle-SSH-Mac.sh",
-        "README.md",
-        "LICENSE"
-    ]
+    # Files to include (Source Path -> Dest Path in Zip)
+    include_files = {
+        "SSH_Key_Wizard.py": "SSH_Key_Wizard.py",
+        "README.md": "README.md",
+        "LICENSE": "LICENSE",
+        os.path.join("platforms", "Windows", "Deploy-SSH-Windows.ps1"): "Deploy-SSH-Windows.ps1",
+        os.path.join("platforms", "Windows", "Uninstall-SSH-Windows.ps1"): "Uninstall-SSH-Windows.ps1",
+        os.path.join("platforms", "Windows", "Toggle-SSH-Windows.ps1"): "Toggle-SSH-Windows.ps1",
+        os.path.join("platforms", "Linux", "Deploy-SSH-Linux.sh"): "Deploy-SSH-Linux.sh",
+        os.path.join("platforms", "Linux", "Uninstall-SSH-Linux.sh"): "Uninstall-SSH-Linux.sh",
+        os.path.join("platforms", "Linux", "Toggle-SSH-Linux.sh"): "Toggle-SSH-Linux.sh",
+        os.path.join("platforms", "Mac", "Deploy-SSH-Mac.sh"): "Deploy-SSH-Mac.sh",
+        os.path.join("platforms", "Mac", "Uninstall-SSH-Mac.sh"): "Uninstall-SSH-Mac.sh",
+        os.path.join("platforms", "Mac", "Toggle-SSH-Mac.sh"): "Toggle-SSH-Mac.sh",
+    }
     
     try:
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for filename in include_files:
-                src = os.path.join(script_dir, filename)
-                if not os.path.exists(src):
-                     # Legacy fallback
-                    legacy_map = {
-                        "Deploy-SSH-Windows.ps1": "Deploy-Windows.ps1",
-                        "Uninstall-SSH-Windows.ps1": "Uninstall-Windows.ps1",
-                        "Deploy-SSH-Linux.sh": "Deploy-Linux.sh",
-                        "Deploy-SSH-Mac.sh": "Deploy-Mac.sh"
-                    }
-                    if filename in legacy_map and os.path.exists(os.path.join(script_dir, legacy_map[filename])):
-                         src = os.path.join(script_dir, legacy_map[filename])
-                         
+            for src_rel, dest_name in include_files.items():
+                src = os.path.join(script_dir, src_rel)
+                        
                 if os.path.exists(src):
-                    zipf.write(src, filename)
+                    zipf.write(src, dest_name)
                 else:
-                    print(f"{Style.YELLOW}⚠️  Skipping missing file: {filename}{Style.RESET}")
+                    print(f"{Style.YELLOW}⚠️  Skipping missing file: {dest_name} (from {src}){Style.RESET}")
         
         print_success(f"Portable Wizard Created: {zip_path}")
         get_input("Press Enter to return to menu", allow_empty=True)
