@@ -282,6 +282,16 @@ def install_local_key(priv_key_path):
                 print(f"   🔒 Permissions set to 600 (rw-------)")
             except Exception as e:
                 print(f"   {Style.YELLOW}⚠️  Could not set permissions: {e}{Style.RESET}")
+        elif os.name == 'nt':
+            try:
+                # Windows equivalent of 600: Remove inheritance, grant user Full Control
+                user = os.environ.get('USERNAME', os.getlogin())
+                subprocess.run(['icacls', dest_path, '/reset'], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(['icacls', dest_path, '/grant:r', f'{user}:F'], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(['icacls', dest_path, '/inheritance:r'], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                print(f"   🔒 Windows ACLs restricted to '{user}'")
+            except Exception as e:
+                print(f"   {Style.YELLOW}⚠️  Could not set Windows ACLs: {e}{Style.RESET}")
                 
         log_action(f"KEY INSTALLED: {dest_path}")
         
@@ -412,6 +422,16 @@ def install_key_menu(default_dir):
                 print(f"   🔒 Permissions set to 600 (rw-------)")
             except Exception as e:
                 print(f"   {Style.YELLOW}⚠️  Could not set permissions: {e}{Style.RESET}")
+        elif os.name == 'nt':
+            try:
+                # Windows equivalent of 600: Remove inheritance, grant user Full Control
+                user = os.environ.get('USERNAME', os.getlogin())
+                subprocess.run(['icacls', dest_path, '/reset'], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(['icacls', dest_path, '/grant:r', f'{user}:F'], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(['icacls', dest_path, '/inheritance:r'], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                print(f"   🔒 Windows ACLs restricted to '{user}'")
+            except Exception as e:
+                print(f"   {Style.YELLOW}⚠️  Could not set Windows ACLs: {e}{Style.RESET}")
 
         get_input("Press Enter to return", allow_empty=True)
 
