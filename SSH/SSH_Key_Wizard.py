@@ -821,20 +821,12 @@ def create_deployment_package(output_dir, payload_path, final_user, device_name)
         else:
              print(f"   {Style.DIM}(Using current payload as-is. Use Menu Option 0 for full audit){Style.RESET}")
 
-    # 1. Prepare Staging Area
-    # Use a unique, visible folder to avoid "cleanup" locks and give user immediate access
-    ts = datetime.datetime.now().strftime("%H%M%S")
-    folder_name = f"Deploy_Staging_{device_name}_{ts}"
-    staging_dir = os.path.join(output_dir, folder_name)
-    
-    print(f"   [Debug] Creating staging folder: {staging_dir}")
-    os.makedirs(staging_dir, exist_ok=True)
+    # 1. Direct-to-Zip Strategy (No Staging Folder)
+    # This avoids creating .ps1/.sh files on disk that trigger Antivirus scans
     
     script_dir = os.path.dirname(os.path.abspath(__file__))
     
-    # 2. Copy Scripts
-    # Key = Source (Relative to script_dir), Value = Dest (Relative to staging_dir)
-    # We now preserve the "Platforms/..." structure in the zip
+    # Files to Include: Source Path -> Zip Path
     files_to_copy = {
         os.path.join("Platforms", "Windows", "Deploy-SSH-Windows.ps1"): os.path.join("Platforms", "Windows", "Deploy-SSH-Windows.ps1"),
         os.path.join("Platforms", "Windows", "Uninstall-SSH-Windows.ps1"): os.path.join("Platforms", "Windows", "Uninstall-SSH-Windows.ps1"),
@@ -852,52 +844,17 @@ def create_deployment_package(output_dir, payload_path, final_user, device_name)
     payload_name = os.path.basename(payload_path)
     has_payload = os.path.exists(payload_path)
     
-    # Calculate Total Operations for Progress Bar (Copying + Zipping)
-    # Estimate: Staging Steps (Scripts + Payload) + Zipping Steps (Scripts + Payload + Readme)
-    staging_steps = len(files_to_copy) + (1 if has_payload else 0)
-    zipping_steps = staging_steps + 1 # +1 for README
-    total_ops = staging_steps + zipping_steps
+    # Calculate Total Operations
+    total_ops = len(files_to_copy) + (1 if has_payload else 0) + 1 # +1 for README
     current_op = 0
 
     print(f"\n   ⏳ Building Package ({total_ops} operations)... [T+0.00s]")
     print_progress_bar(current_op, total_ops, prefix='Progress:', suffix='Starting...', length=30)
     
-    # Copy Payload (if it exists)
-    if has_payload:
-        shutil.copy2(payload_path, os.path.join(staging_dir, payload_name))
-        current_op += 1
-        print_progress_bar(current_op, total_ops, prefix='Staging:', suffix='Payload Copied', length=30)
-    else:
-        print(f"{Style.YELLOW}⚠️  Warning: Payload file '{payload_name}' not found. Skipping.{Style.RESET}")
-
-    # Copy Scripts
-    for src_rel, dest_rel in files_to_copy.items():
-        src = os.path.join(script_dir, src_rel)
-        dest = os.path.join(staging_dir, dest_rel)
-        
-        # Ensure destination folder exists
-        os.makedirs(os.path.dirname(dest), exist_ok=True)
-        
-        if os.path.exists(src):
-            shutil.copy2(src, dest)
-            # Make sure shell scripts are executable
-            if dest.endswith(".sh") and os.name == 'posix':
-                try: os.chmod(dest, 0o755)
-                except: pass
-        else:
-             print(f"{Style.RED}❌ Error: Script '{dest_rel}' not found at '{src}'.{Style.RESET}")
-        
-        current_op += 1
-        elapsed = time.time() - t_start
-        # print(f" [Debug: Op {current_op}/{total_ops} - {elapsed:.2f}s]") # Verbose debug
-        import time
-        time.sleep(0.05)
-        print_progress_bar(current_op, total_ops, prefix='Staging:', suffix=f'Copied ({elapsed:.1f}s)', length=30)
-
     # Derive key name for documentation
     priv_key_name = f"id_ed25519_{device_name}_{final_user}"
 
-    # 3. Create README.txt
+    # Create README Content
     readme_content = f"""
 WINTOOLS: SSH Deployment Package
 ================================
@@ -941,48 +898,51 @@ Windows: powershell -ExecutionPolicy Bypass -File .\\Platforms\\Windows\\Uninsta
 Linux:   sudo bash ./Platforms/Linux/Uninstall-SSH-Linux.sh
 MacOS:   sudo bash ./Platforms/Mac/Uninstall-SSH-Mac.sh
 """
-    with open(os.path.join(staging_dir, "README_INSTALL.txt"), "w") as f:
-        f.write(readme_content.strip())
 
-    # 4. Zip It
+    # 4. Zip It Directly
     zip_name = f"Deploy-Package-{device_name}.zip"
     zip_path = os.path.join(output_dir, zip_name)
     
     try:
-        # Pre-calculate file list for progress bar
-        file_list = []
-        for root, dirs, files in os.walk(staging_dir):
-            for file in files:
-                file_list.append(os.path.join(root, file))
-        
-        # Adjust total_ops to be exact based on actual files found (re-sync)
-        # We did (current_op) steps so far. Remaining steps = len(file_list).
-        total_ops = current_op + len(file_list)
-
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for i, file_path in enumerate(file_list):
-                arcname = os.path.relpath(file_path, staging_dir)
-                zipf.write(file_path, arcname)
-                # Update Progress Bar
+            
+            # 1. Add Scripts
+            for src_rel, arcname in files_to_copy.items():
+                src = os.path.join(script_dir, src_rel)
+                
+                if os.path.exists(src):
+                    zipf.write(src, arcname)
+                    # Note: We lose the explicit 'chmod +x' here for POSIX inside zip, 
+                    # but unzip usually respects the source permissions or user runs with 'bash' anyway.
+                    # To be safe, we can manually set external_attr if needed, but standard write is usually fine.
+                else:
+                    print(f"{Style.RED}❌ Error: Script '{src_rel}' not found.{Style.RESET}")
+                
                 current_op += 1
                 elapsed = time.time() - t_start
-                
-                # Artificial delay to ensure user sees the progress (the operation is otherwise too fast)
-                import time
-                time.sleep(0.05) 
+                # import time; time.sleep(0.05) # Delay not needed if we want SPEED now
                 print_progress_bar(current_op, total_ops, prefix='Zipping:', suffix=f'({elapsed:.1f}s)', length=30)
-        
+
+            # 2. Add Payload
+            if has_payload:
+                zipf.write(payload_path, payload_name)
+                current_op += 1
+                elapsed = time.time() - t_start
+                print_progress_bar(current_op, total_ops, prefix='Zipping:', suffix=f'({elapsed:.1f}s)', length=30)
+            else:
+                 print(f"{Style.YELLOW}⚠️  Warning: Payload not found.{Style.RESET}")
+
+            # 3. Add Readme (from memory)
+            zipf.writestr("README_INSTALL.txt", readme_content.strip())
+            current_op += 1
+            print_progress_bar(current_op, total_ops, prefix='Zipping:', suffix='Complete', length=30)
+
         total_time = time.time() - t_start
         print_success(f"Package Created: {zip_path} in {total_time:.2f}s")
         print(f"   {Style.DIM}Contains: Scripts, Payload, and Instructions.{Style.RESET}")
         
     except Exception as e:
         print_error(f"Failed to create zip package: {e}")
-    finally:
-        # Retention: Keep the folder so if Zip fails/hangs, user still has the files
-        print(f"\n   {Style.YELLOW}ℹ️  Staging folder preserved: {os.path.basename(staging_dir)}{Style.RESET}")
-        # if os.path.exists(staging_dir):
-        #     shutil.rmtree(staging_dir)
 
     get_input("\nPress Enter to return to menu...", allow_empty=True)
     return zip_path
