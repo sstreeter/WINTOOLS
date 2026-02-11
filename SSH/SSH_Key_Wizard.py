@@ -792,15 +792,15 @@ def create_deployment_package(output_dir, payload_path, final_user, device_name)
     # 2. Copy Scripts
     # Key = Source (Relative to script_dir), Value = Dest (In Zip/Staging)
     files_to_copy = {
-        os.path.join("platforms", "Windows", "Deploy-SSH-Windows.ps1"): "Deploy-SSH-Windows.ps1",
-        os.path.join("platforms", "Windows", "Uninstall-SSH-Windows.ps1"): "Uninstall-SSH-Windows.ps1",
-        os.path.join("platforms", "Windows", "Toggle-SSH-Windows.ps1"): "Toggle-SSH-Windows.ps1",
-        os.path.join("platforms", "Linux", "Deploy-SSH-Linux.sh"): "Deploy-SSH-Linux.sh",
-        os.path.join("platforms", "Linux", "Uninstall-SSH-Linux.sh"): "Uninstall-SSH-Linux.sh",
-        os.path.join("platforms", "Linux", "Toggle-SSH-Linux.sh"): "Toggle-SSH-Linux.sh",
-        os.path.join("platforms", "Mac", "Deploy-SSH-Mac.sh"): "Deploy-SSH-Mac.sh",
-        os.path.join("platforms", "Mac", "Uninstall-SSH-Mac.sh"): "Uninstall-SSH-Mac.sh",
-        os.path.join("platforms", "Mac", "Toggle-SSH-Mac.sh"): "Toggle-SSH-Mac.sh",
+        os.path.join("Platforms", "Windows", "Deploy-SSH-Windows.ps1"): "Deploy-SSH-Windows.ps1",
+        os.path.join("Platforms", "Windows", "Uninstall-SSH-Windows.ps1"): "Uninstall-SSH-Windows.ps1",
+        os.path.join("Platforms", "Windows", "Toggle-SSH-Windows.ps1"): "Toggle-SSH-Windows.ps1",
+        os.path.join("Platforms", "Linux", "Deploy-SSH-Linux.sh"): "Deploy-SSH-Linux.sh",
+        os.path.join("Platforms", "Linux", "Uninstall-SSH-Linux.sh"): "Uninstall-SSH-Linux.sh",
+        os.path.join("Platforms", "Linux", "Toggle-SSH-Linux.sh"): "Toggle-SSH-Linux.sh",
+        os.path.join("Platforms", "Mac", "Deploy-SSH-Mac.sh"): "Deploy-SSH-Mac.sh",
+        os.path.join("Platforms", "Mac", "Uninstall-SSH-Mac.sh"): "Uninstall-SSH-Mac.sh",
+        os.path.join("Platforms", "Mac", "Toggle-SSH-Mac.sh"): "Toggle-SSH-Mac.sh",
     }
     
     payload_name = os.path.basename(payload_path)
@@ -927,15 +927,15 @@ def create_portable_wizard(output_dir):
         "SSH_Key_Wizard.py": "SSH_Key_Wizard.py",
         "README.md": "README.md",
         "LICENSE": "LICENSE",
-        os.path.join("platforms", "Windows", "Deploy-SSH-Windows.ps1"): "Deploy-SSH-Windows.ps1",
-        os.path.join("platforms", "Windows", "Uninstall-SSH-Windows.ps1"): "Uninstall-SSH-Windows.ps1",
-        os.path.join("platforms", "Windows", "Toggle-SSH-Windows.ps1"): "Toggle-SSH-Windows.ps1",
-        os.path.join("platforms", "Linux", "Deploy-SSH-Linux.sh"): "Deploy-SSH-Linux.sh",
-        os.path.join("platforms", "Linux", "Uninstall-SSH-Linux.sh"): "Uninstall-SSH-Linux.sh",
-        os.path.join("platforms", "Linux", "Toggle-SSH-Linux.sh"): "Toggle-SSH-Linux.sh",
-        os.path.join("platforms", "Mac", "Deploy-SSH-Mac.sh"): "Deploy-SSH-Mac.sh",
-        os.path.join("platforms", "Mac", "Uninstall-SSH-Mac.sh"): "Uninstall-SSH-Mac.sh",
-        os.path.join("platforms", "Mac", "Toggle-SSH-Mac.sh"): "Toggle-SSH-Mac.sh",
+        os.path.join("Platforms", "Windows", "Deploy-SSH-Windows.ps1"): "Deploy-SSH-Windows.ps1",
+        os.path.join("Platforms", "Windows", "Uninstall-SSH-Windows.ps1"): "Uninstall-SSH-Windows.ps1",
+        os.path.join("Platforms", "Windows", "Toggle-SSH-Windows.ps1"): "Toggle-SSH-Windows.ps1",
+        os.path.join("Platforms", "Linux", "Deploy-SSH-Linux.sh"): "Deploy-SSH-Linux.sh",
+        os.path.join("Platforms", "Linux", "Uninstall-SSH-Linux.sh"): "Uninstall-SSH-Linux.sh",
+        os.path.join("Platforms", "Linux", "Toggle-SSH-Linux.sh"): "Toggle-SSH-Linux.sh",
+        os.path.join("Platforms", "Mac", "Deploy-SSH-Mac.sh"): "Deploy-SSH-Mac.sh",
+        os.path.join("Platforms", "Mac", "Uninstall-SSH-Mac.sh"): "Uninstall-SSH-Mac.sh",
+        os.path.join("Platforms", "Mac", "Toggle-SSH-Mac.sh"): "Toggle-SSH-Mac.sh",
     }
     
     try:
