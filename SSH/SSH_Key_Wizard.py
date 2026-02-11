@@ -849,6 +849,20 @@ def create_deployment_package(output_dir, payload_path, final_user, device_name)
     current_op = 0
 
     print(f"\n   ⏳ Building Package ({total_ops} operations)... [T+0.00s]")
+    
+    # [Performance] Prune Old Archives
+    # User suspects old files cause hangs. Let's clean them up.
+    try:
+        old_zips = [f for f in os.listdir(output_dir) if f.startswith("Deploy-Package-") and f.endswith(".zip")]
+        if old_zips:
+            print(f"   [Cleanup] Removing {len(old_zips)} old package(s)...", end="")
+            for z in old_zips:
+                try: os.remove(os.path.join(output_dir, z))
+                except: pass
+            print(" Done.")
+    except Exception as e:
+        print(f"   [Cleanup Warning] {e}")
+
     print_progress_bar(current_op, total_ops, prefix='Progress:', suffix='Starting...', length=30)
     
     # Derive key name for documentation
@@ -953,10 +967,17 @@ MacOS:   sudo bash ./Platforms/Mac/Uninstall-SSH-Mac.sh
         zip_name = f"Deploy-Package-{device_name}.zip"
         zip_path = os.path.join(output_dir, zip_name)
         
-        print(f"\n   💾 Writing to disk...", end="")
+        # Explicitly remove target to avoid overwrite locks
+        if os.path.exists(zip_path):
+            try: os.remove(zip_path)
+            except Exception as e:
+                print(f"\n   {Style.YELLOW}⚠️  Could not remove old file: {e}{Style.RESET}")
+
+        print(f"\n   💾 Writing {len(mem_zip.getvalue())/1024:.1f}KB to disk...", end="")
+        t_write = time.time()
         with open(zip_path, "wb") as f:
             f.write(mem_zip.getvalue())
-        print(" Done.")
+        print(f" Done ({time.time() - t_write:.4f}s)")
 
         total_time = time.time() - t_start
         print_success(f"Package Created: {zip_path} in {total_time:.2f}s")
