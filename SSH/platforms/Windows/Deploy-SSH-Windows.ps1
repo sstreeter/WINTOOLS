@@ -129,7 +129,8 @@ function Update-Config {
             "PubkeyAuthentication yes",
             "PasswordAuthentication $pwdValue"
         ) | Set-Content -Path $ConfigPath -Encoding ASCII
-        return
+        # Do not return! Fall through to ensure permissions are fixed and Match block is added.
+        Write-Output "Created minimal config. Proceeding to configure settings and permissions..."
     }
 
     # Use ASCII/Default to read - avoiding explicit UTF8 might be safer if file has no BOM
