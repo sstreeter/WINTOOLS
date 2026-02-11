@@ -7,11 +7,11 @@ Deploy, manage, and secure **OpenSSH Server** on Windows 10/11 endpoints.
 | Script | Description |
 | :--- | :--- |
 | **[SSH_Key_Wizard.py](SSH_Key_Wizard.py)** | **(Admin Local)** Cross-platform Wizard. Generates secure Ed25519 keys, backs up old ones, and helps you organize them for deployment. **Now with improved sorting!** |
-| **[Deploy-SSH-Windows.ps1](Deploy-SSH-Windows.ps1)** | **(Endpoint)** Installs OpenSSH, configures Port 22, deploys keys, and sets firewall rules. Includes **Deep Diagnostics** for troubleshooting service failures. |
-| **[Toggle-SSH-Windows.ps1](Toggle-SSH-Windows.ps1)** | **(Endpoint)** Quickly Enable/Disable SSH service. Supports Just-In-Time (JIT) access. |
-| **[Toggle-SSH-Mac.sh](Toggle-SSH-Mac.sh)** | **(Endpoint)** Quickly Enable/Disable "Remote Login" (SSH). |
-| **[Toggle-SSH-Linux.sh](Toggle-SSH-Linux.sh)** | **(Endpoint)** Quickly Enable/Disable SSH service (systemd/init). |
-| **[Uninstall-SSH-Windows.ps1](Uninstall-SSH-Windows.ps1)** | **(Endpoint)** Completely removes OpenSSH (Service, Firewall, Keys). |
+| **[Deploy-SSH-Windows.ps1](Platforms/Windows/Deploy-SSH-Windows.ps1)** | **(Endpoint)** Installs OpenSSH, configures Port 22, deploys keys, and sets firewall rules. Includes **Deep Diagnostics** for troubleshooting service failures. |
+| **[Toggle-SSH-Windows.ps1](Platforms/Windows/Toggle-SSH-Windows.ps1)** | **(Endpoint)** Quickly Enable/Disable SSH service. Supports Just-In-Time (JIT) access. |
+| **[Toggle-SSH-Mac.sh](Platforms/Mac/Toggle-SSH-Mac.sh)** | **(Endpoint)** Quickly Enable/Disable "Remote Login" (SSH). |
+| **[Toggle-SSH-Linux.sh](Platforms/Linux/Toggle-SSH-Linux.sh)** | **(Endpoint)** Quickly Enable/Disable SSH service (systemd/init). |
+| **[Uninstall-SSH-Windows.ps1](Platforms/Windows/Uninstall-SSH-Windows.ps1)** | **(Endpoint)** Completely removes OpenSSH (Service, Firewall, Keys). |
 
 ## 🚀 Workflow
 
