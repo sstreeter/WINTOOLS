@@ -58,6 +58,21 @@ def print_header():
     print(f"{Style.DIM}Running on: {platform.system()} ({platform.release()}){Style.RESET}")
     print(f"{Style.BLUE}----------------------------------------{Style.RESET}")
 
+def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, length=30, fill='█', printEnd="\r"):
+    """
+    Call in a loop to create terminal progress bar
+    """
+    if total == 0: total = 1
+    percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
+    filledLength = int(length * iteration // total)
+    bar = fill * filledLength + '-' * (length - filledLength)
+    # Rainbow effect slightly
+    color = Style.CYAN if iteration < total else Style.GREEN
+    print(f'\r{prefix} {color}|{bar}|{Style.RESET} {percent}% {suffix}', end=printEnd)
+    # Print New Line on Complete
+    if iteration == total: 
+        print()
+
 class WizardExit(Exception): pass
 
 def get_input(prompt, default=None, allow_empty=False):
@@ -907,12 +922,21 @@ MacOS:   sudo bash ./Platforms/Mac/Uninstall-SSH-Mac.sh
     zip_path = os.path.join(output_dir, zip_name)
     
     try:
+        # Pre-calculate file list for progress bar
+        file_list = []
+        for root, dirs, files in os.walk(staging_dir):
+            for file in files:
+                file_list.append(os.path.join(root, file))
+        
+        total_files = len(file_list)
+        print(f"\n   ⏳ Compressing {total_files} files...")
+
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for root, dirs, files in os.walk(staging_dir):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    arcname = os.path.relpath(file_path, staging_dir)
-                    zipf.write(file_path, arcname)
+            for i, file_path in enumerate(file_list):
+                arcname = os.path.relpath(file_path, staging_dir)
+                zipf.write(file_path, arcname)
+                # Update Progress Bar
+                print_progress_bar(i + 1, total_files, prefix='Zipping:', suffix='Complete', length=30)
         
         print_success(f"Package Created: {zip_path}")
         print(f"   {Style.DIM}Contains: Scripts, Payload, and Instructions.{Style.RESET}")
@@ -960,14 +984,20 @@ def create_portable_wizard(output_dir):
     }
     
     try:
+        total_files = len(include_files)
+        print(f"\n   ⏳ Compressing {total_files} files...")
+
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for src_rel, dest_name in include_files.items():
+            for i, (src_rel, dest_name) in enumerate(include_files.items()):
                 src = os.path.join(script_dir, src_rel)
                         
                 if os.path.exists(src):
                     zipf.write(src, dest_name)
                 else:
-                    print(f"{Style.YELLOW}⚠️  Skipping missing file: {dest_name} (from {src}){Style.RESET}")
+                    print(f"\n{Style.YELLOW}⚠️  Skipping missing file: {dest_name} (from {src}){Style.RESET}")
+                
+                # Update Progress Bar
+                print_progress_bar(i + 1, total_files, prefix='Zipping:', suffix='Complete', length=30)
         
         print_success(f"Portable Wizard Created: {zip_path}")
         get_input("Press Enter to return to menu", allow_empty=True)
