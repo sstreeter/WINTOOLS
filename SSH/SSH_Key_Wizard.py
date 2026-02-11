@@ -822,9 +822,13 @@ def create_deployment_package(output_dir, payload_path, final_user, device_name)
              print(f"   {Style.DIM}(Using current payload as-is. Use Menu Option 0 for full audit){Style.RESET}")
 
     # 1. Prepare Staging Area
-    import tempfile
-    staging_dir = tempfile.mkdtemp(prefix="Deploy_Staging_")
-    print(f"   [Debug] Using temporary staging: {staging_dir}")
+    # Use a unique, visible folder to avoid "cleanup" locks and give user immediate access
+    ts = datetime.datetime.now().strftime("%H%M%S")
+    folder_name = f"Deploy_Staging_{device_name}_{ts}"
+    staging_dir = os.path.join(output_dir, folder_name)
+    
+    print(f"   [Debug] Creating staging folder: {staging_dir}")
+    os.makedirs(staging_dir, exist_ok=True)
     
     script_dir = os.path.dirname(os.path.abspath(__file__))
     
@@ -975,12 +979,10 @@ MacOS:   sudo bash ./Platforms/Mac/Uninstall-SSH-Mac.sh
     except Exception as e:
         print_error(f"Failed to create zip package: {e}")
     finally:
-        # Cleanup Staging
-        st = time.time()
-        print(f" [Debug] Cleaning up staging... ({st - t_start:.2f}s)")
-        if os.path.exists(staging_dir):
-            shutil.rmtree(staging_dir)
-        print(f" [Debug] Cleanup done. (+{time.time() - st:.2f}s)")
+        # Retention: Keep the folder so if Zip fails/hangs, user still has the files
+        print(f"\n   {Style.YELLOW}ℹ️  Staging folder preserved: {os.path.basename(staging_dir)}{Style.RESET}")
+        # if os.path.exists(staging_dir):
+        #     shutil.rmtree(staging_dir)
 
     get_input("\nPress Enter to return to menu...", allow_empty=True)
     return zip_path
