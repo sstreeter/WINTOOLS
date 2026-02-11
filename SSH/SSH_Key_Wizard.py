@@ -880,6 +880,8 @@ def create_deployment_package(output_dir, payload_path, final_user, device_name)
              print(f"{Style.RED}❌ Error: Script '{dest_rel}' not found at '{src}'.{Style.RESET}")
         
         current_op += 1
+        import time
+        time.sleep(0.05)
         print_progress_bar(current_op, total_ops, prefix='Staging:', suffix='Scripts Copied', length=30)
 
     # Derive key name for documentation
@@ -953,6 +955,9 @@ MacOS:   sudo bash ./Platforms/Mac/Uninstall-SSH-Mac.sh
                 zipf.write(file_path, arcname)
                 # Update Progress Bar
                 current_op += 1
+                # Artificial delay to ensure user sees the progress (the operation is otherwise too fast)
+                import time
+                time.sleep(0.05) 
                 print_progress_bar(current_op, total_ops, prefix='Zipping:', suffix='Complete', length=30)
         
         print_success(f"Package Created: {zip_path}")
@@ -964,6 +969,7 @@ MacOS:   sudo bash ./Platforms/Mac/Uninstall-SSH-Mac.sh
         # Cleanup Staging
         shutil.rmtree(staging_dir)
 
+    get_input("\nPress Enter to return to menu...", allow_empty=True)
     return zip_path
 
 
