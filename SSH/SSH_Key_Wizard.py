@@ -810,17 +810,21 @@ def create_deployment_package(output_dir, payload_path, final_user, device_name)
     script_dir = os.path.dirname(os.path.abspath(__file__))
     
     # 2. Copy Scripts
-    # Key = Source (Relative to script_dir), Value = Dest (In Zip/Staging)
+    # 2. Copy Scripts
+    # Key = Source (Relative to script_dir), Value = Dest (Relative to staging_dir)
+    # We now preserve the "Platforms/..." structure in the zip
     files_to_copy = {
-        os.path.join("Platforms", "Windows", "Deploy-SSH-Windows.ps1"): "Deploy-SSH-Windows.ps1",
-        os.path.join("Platforms", "Windows", "Uninstall-SSH-Windows.ps1"): "Uninstall-SSH-Windows.ps1",
-        os.path.join("Platforms", "Windows", "Toggle-SSH-Windows.ps1"): "Toggle-SSH-Windows.ps1",
-        os.path.join("Platforms", "Linux", "Deploy-SSH-Linux.sh"): "Deploy-SSH-Linux.sh",
-        os.path.join("Platforms", "Linux", "Uninstall-SSH-Linux.sh"): "Uninstall-SSH-Linux.sh",
-        os.path.join("Platforms", "Linux", "Toggle-SSH-Linux.sh"): "Toggle-SSH-Linux.sh",
-        os.path.join("Platforms", "Mac", "Deploy-SSH-Mac.sh"): "Deploy-SSH-Mac.sh",
-        os.path.join("Platforms", "Mac", "Uninstall-SSH-Mac.sh"): "Uninstall-SSH-Mac.sh",
-        os.path.join("Platforms", "Mac", "Toggle-SSH-Mac.sh"): "Toggle-SSH-Mac.sh",
+        os.path.join("Platforms", "Windows", "Deploy-SSH-Windows.ps1"): os.path.join("Platforms", "Windows", "Deploy-SSH-Windows.ps1"),
+        os.path.join("Platforms", "Windows", "Uninstall-SSH-Windows.ps1"): os.path.join("Platforms", "Windows", "Uninstall-SSH-Windows.ps1"),
+        os.path.join("Platforms", "Windows", "Toggle-SSH-Windows.ps1"): os.path.join("Platforms", "Windows", "Toggle-SSH-Windows.ps1"),
+        
+        os.path.join("Platforms", "Linux", "Deploy-SSH-Linux.sh"): os.path.join("Platforms", "Linux", "Deploy-SSH-Linux.sh"),
+        os.path.join("Platforms", "Linux", "Uninstall-SSH-Linux.sh"): os.path.join("Platforms", "Linux", "Uninstall-SSH-Linux.sh"),
+        os.path.join("Platforms", "Linux", "Toggle-SSH-Linux.sh"): os.path.join("Platforms", "Linux", "Toggle-SSH-Linux.sh"),
+        
+        os.path.join("Platforms", "Mac", "Deploy-SSH-Mac.sh"): os.path.join("Platforms", "Mac", "Deploy-SSH-Mac.sh"),
+        os.path.join("Platforms", "Mac", "Uninstall-SSH-Mac.sh"): os.path.join("Platforms", "Mac", "Uninstall-SSH-Mac.sh"),
+        os.path.join("Platforms", "Mac", "Toggle-SSH-Mac.sh"): os.path.join("Platforms", "Mac", "Toggle-SSH-Mac.sh"),
     }
     
     payload_name = os.path.basename(payload_path)
@@ -832,26 +836,21 @@ def create_deployment_package(output_dir, payload_path, final_user, device_name)
         print(f"{Style.YELLOW}⚠️  Warning: Payload file '{payload_name}' not found. Skipping.{Style.RESET}")
 
     # Copy Scripts
-    for filename, dest_name in files_to_copy.items():
-        src = os.path.join(script_dir, filename)
+    for src_rel, dest_rel in files_to_copy.items():
+        src = os.path.join(script_dir, src_rel)
+        dest = os.path.join(staging_dir, dest_rel)
+        
+        # Ensure destination folder exists
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        
         if os.path.exists(src):
-            shutil.copy2(src, os.path.join(staging_dir, dest_name))
+            shutil.copy2(src, dest)
             # Make sure shell scripts are executable
-            if dest_name.endswith(".sh") and os.name == 'posix':
-                try: os.chmod(os.path.join(staging_dir, dest_name), 0o755)
+            if dest.endswith(".sh") and os.name == 'posix':
+                try: os.chmod(dest, 0o755)
                 except: pass
         else:
-            # Try legacy name fallback just in case file rename failed or is pending
-            legacy_map = {
-                "Deploy-SSH-Windows.ps1": "Deploy-Windows.ps1",
-                "Uninstall-SSH-Windows.ps1": "Uninstall-Windows.ps1",
-                "Deploy-SSH-Linux.sh": "Deploy-Linux.sh",
-                "Deploy-SSH-Mac.sh": "Deploy-Mac.sh"
-            }
-            if filename in legacy_map and os.path.exists(os.path.join(script_dir, legacy_map[filename])):
-                 shutil.copy2(os.path.join(script_dir, legacy_map[filename]), os.path.join(staging_dir, dest_name))
-            else:
-                 print(f"{Style.RED}❌ Error: Script '{filename}' not found in '{script_dir}'.{Style.RESET}")
+             print(f"{Style.RED}❌ Error: Script '{dest_rel}' not found at '{src}'.{Style.RESET}")
 
     # Derive key name for documentation
     priv_key_name = f"id_ed25519_{device_name}_{final_user}"
@@ -873,19 +872,19 @@ IMPORTANT: SSH Keys authorize a specific USER account.
 1. Copy folder to target PC.
 2. Open PowerShell as Administrator.
 3. Run:
-   powershell -ExecutionPolicy Bypass -File .\\Deploy-SSH-Windows.ps1 `
+   powershell -ExecutionPolicy Bypass -File .\\Platforms\\Windows\\Deploy-SSH-Windows.ps1 `
      -KeysFile .\\{payload_name} `
      -DisablePasswordAuth
 
 [LINUX]
 1. Copy folder to target machine.
 2. Run:
-   sudo bash ./Deploy-SSH-Linux.sh
+   sudo bash ./Platforms/Linux/Deploy-SSH-Linux.sh
 
 [MACOS]
 1. Copy folder to target Mac.
 2. Run:
-   sudo bash ./Deploy-SSH-Mac.sh
+   sudo bash ./Platforms/Mac/Deploy-SSH-Mac.sh
 
 CLIENT SETUP (Connecting):
 --------------------------
@@ -896,9 +895,9 @@ CLIENT SETUP (Connecting):
 
 UNINSTALL:
 ----------
-Windows: powershell -File .\\Uninstall-SSH-Windows.ps1
-Linux:   sudo bash ./Uninstall-SSH-Linux.sh
-MacOS:   sudo bash ./Uninstall-SSH-Mac.sh
+Windows: powershell -File .\\Platforms\\Windows\\Uninstall-SSH-Windows.ps1
+Linux:   sudo bash ./Platforms/Linux/Uninstall-SSH-Linux.sh
+MacOS:   sudo bash ./Platforms/Mac/Uninstall-SSH-Mac.sh
 """
     with open(os.path.join(staging_dir, "README_INSTALL.txt"), "w") as f:
         f.write(readme_content.strip())
@@ -947,15 +946,17 @@ def create_portable_wizard(output_dir):
         "SSH_Key_Wizard.py": "SSH_Key_Wizard.py",
         "README.md": "README.md",
         "LICENSE": "LICENSE",
-        os.path.join("Platforms", "Windows", "Deploy-SSH-Windows.ps1"): "Deploy-SSH-Windows.ps1",
-        os.path.join("Platforms", "Windows", "Uninstall-SSH-Windows.ps1"): "Uninstall-SSH-Windows.ps1",
-        os.path.join("Platforms", "Windows", "Toggle-SSH-Windows.ps1"): "Toggle-SSH-Windows.ps1",
-        os.path.join("Platforms", "Linux", "Deploy-SSH-Linux.sh"): "Deploy-SSH-Linux.sh",
-        os.path.join("Platforms", "Linux", "Uninstall-SSH-Linux.sh"): "Uninstall-SSH-Linux.sh",
-        os.path.join("Platforms", "Linux", "Toggle-SSH-Linux.sh"): "Toggle-SSH-Linux.sh",
-        os.path.join("Platforms", "Mac", "Deploy-SSH-Mac.sh"): "Deploy-SSH-Mac.sh",
-        os.path.join("Platforms", "Mac", "Uninstall-SSH-Mac.sh"): "Uninstall-SSH-Mac.sh",
-        os.path.join("Platforms", "Mac", "Toggle-SSH-Mac.sh"): "Toggle-SSH-Mac.sh",
+        os.path.join("Platforms", "Windows", "Deploy-SSH-Windows.ps1"): os.path.join("Platforms", "Windows", "Deploy-SSH-Windows.ps1"),
+        os.path.join("Platforms", "Windows", "Uninstall-SSH-Windows.ps1"): os.path.join("Platforms", "Windows", "Uninstall-SSH-Windows.ps1"),
+        os.path.join("Platforms", "Windows", "Toggle-SSH-Windows.ps1"): os.path.join("Platforms", "Windows", "Toggle-SSH-Windows.ps1"),
+        
+        os.path.join("Platforms", "Linux", "Deploy-SSH-Linux.sh"): os.path.join("Platforms", "Linux", "Deploy-SSH-Linux.sh"),
+        os.path.join("Platforms", "Linux", "Uninstall-SSH-Linux.sh"): os.path.join("Platforms", "Linux", "Uninstall-SSH-Linux.sh"),
+        os.path.join("Platforms", "Linux", "Toggle-SSH-Linux.sh"): os.path.join("Platforms", "Linux", "Toggle-SSH-Linux.sh"),
+        
+        os.path.join("Platforms", "Mac", "Deploy-SSH-Mac.sh"): os.path.join("Platforms", "Mac", "Deploy-SSH-Mac.sh"),
+        os.path.join("Platforms", "Mac", "Uninstall-SSH-Mac.sh"): os.path.join("Platforms", "Mac", "Uninstall-SSH-Mac.sh"),
+        os.path.join("Platforms", "Mac", "Toggle-SSH-Mac.sh"): os.path.join("Platforms", "Mac", "Toggle-SSH-Mac.sh"),
     }
     
     try:
