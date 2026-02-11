@@ -825,7 +825,6 @@ def create_deployment_package(output_dir, payload_path, final_user, device_name)
     script_dir = os.path.dirname(os.path.abspath(__file__))
     
     # 2. Copy Scripts
-    # 2. Copy Scripts
     # Key = Source (Relative to script_dir), Value = Dest (Relative to staging_dir)
     # We now preserve the "Platforms/..." structure in the zip
     files_to_copy = {
@@ -843,10 +842,23 @@ def create_deployment_package(output_dir, payload_path, final_user, device_name)
     }
     
     payload_name = os.path.basename(payload_path)
+    has_payload = os.path.exists(payload_path)
+    
+    # Calculate Total Operations for Progress Bar (Copying + Zipping)
+    # Estimate: Staging Steps (Scripts + Payload) + Zipping Steps (Scripts + Payload + Readme)
+    staging_steps = len(files_to_copy) + (1 if has_payload else 0)
+    zipping_steps = staging_steps + 1 # +1 for README
+    total_ops = staging_steps + zipping_steps
+    current_op = 0
+
+    print(f"\n   ⏳ Building Package ({total_ops} operations)...")
+    print_progress_bar(current_op, total_ops, prefix='Progress:', suffix='Starting...', length=30)
     
     # Copy Payload (if it exists)
-    if os.path.exists(payload_path):
+    if has_payload:
         shutil.copy2(payload_path, os.path.join(staging_dir, payload_name))
+        current_op += 1
+        print_progress_bar(current_op, total_ops, prefix='Staging:', suffix='Payload Copied', length=30)
     else:
         print(f"{Style.YELLOW}⚠️  Warning: Payload file '{payload_name}' not found. Skipping.{Style.RESET}")
 
@@ -866,6 +878,9 @@ def create_deployment_package(output_dir, payload_path, final_user, device_name)
                 except: pass
         else:
              print(f"{Style.RED}❌ Error: Script '{dest_rel}' not found at '{src}'.{Style.RESET}")
+        
+        current_op += 1
+        print_progress_bar(current_op, total_ops, prefix='Staging:', suffix='Scripts Copied', length=30)
 
     # Derive key name for documentation
     priv_key_name = f"id_ed25519_{device_name}_{final_user}"
@@ -928,15 +943,17 @@ MacOS:   sudo bash ./Platforms/Mac/Uninstall-SSH-Mac.sh
             for file in files:
                 file_list.append(os.path.join(root, file))
         
-        total_files = len(file_list)
-        print(f"\n   ⏳ Compressing {total_files} files...")
+        # Adjust total_ops to be exact based on actual files found (re-sync)
+        # We did (current_op) steps so far. Remaining steps = len(file_list).
+        total_ops = current_op + len(file_list)
 
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
             for i, file_path in enumerate(file_list):
                 arcname = os.path.relpath(file_path, staging_dir)
                 zipf.write(file_path, arcname)
                 # Update Progress Bar
-                print_progress_bar(i + 1, total_files, prefix='Zipping:', suffix='Complete', length=30)
+                current_op += 1
+                print_progress_bar(current_op, total_ops, prefix='Zipping:', suffix='Complete', length=30)
         
         print_success(f"Package Created: {zip_path}")
         print(f"   {Style.DIM}Contains: Scripts, Payload, and Instructions.{Style.RESET}")
