@@ -273,6 +273,13 @@ try {
     # 2. Deploy keys
     Deploy-Keys -KeyArray $AdminKeys
 
+    # 2.5 Ensure Host Keys (Required for Config Validation)
+    $sshKeyGen = "C:\Windows\System32\OpenSSH\ssh-keygen.exe"
+    if (Test-Path $sshKeyGen) {
+         Write-Output "Ensuring host keys exist..."
+         & $sshKeyGen -A
+    }
+
     # 3. Update configuration
     Update-Config -Port $SSHPort -DisablePwdAuth $DisablePasswordAuth.IsPresent
 
@@ -285,12 +292,7 @@ try {
     # We use sc.exe because Set-Service doesn't handle dependencies well
     cmd.exe /c "sc.exe config sshd depend= /" | Out-Null
 
-    # ENSURE HOST KEYS EXIST (Crucial for service start)
-    $sshKeyGen = "C:\Windows\System32\OpenSSH\ssh-keygen.exe"
-    if (Test-Path $sshKeyGen) {
-         Write-Output "Ensuring host keys exist..."
-         & $sshKeyGen -A
-    }
+
 
     Write-Output "Setting sshd service to Automatic startup..."
     Set-Service -Name $ServiceName -StartupType Automatic -ErrorAction Stop
