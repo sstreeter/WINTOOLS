@@ -975,7 +975,11 @@ MacOS:   sudo bash ./Platforms/Mac/Uninstall-SSH-Mac.sh
         print_error(f"Failed to create zip package: {e}")
     finally:
         # Cleanup Staging
-        shutil.rmtree(staging_dir)
+        st = time.time()
+        print(f" [Debug] Cleaning up staging... ({st - t_start:.2f}s)")
+        if os.path.exists(staging_dir):
+            shutil.rmtree(staging_dir)
+        print(f" [Debug] Cleanup done. (+{time.time() - st:.2f}s)")
 
     get_input("\nPress Enter to return to menu...", allow_empty=True)
     return zip_path
