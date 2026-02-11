@@ -899,12 +899,14 @@ Linux:   sudo bash ./Platforms/Linux/Uninstall-SSH-Linux.sh
 MacOS:   sudo bash ./Platforms/Mac/Uninstall-SSH-Mac.sh
 """
 
-    # 4. Zip It Directly
-    zip_name = f"Deploy-Package-{device_name}.zip"
-    zip_path = os.path.join(output_dir, zip_name)
+    # 4. Zip It In-Memory (RAM) 
+    # Strategy: Build entire zip in RAM to avoid disk I/O locks, then write ONCE.
+    import io
+    mem_zip = io.BytesIO()
     
     try:
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        # Use ZIP_STORED (No Compression) for max speed and lower AV profile
+        with zipfile.ZipFile(mem_zip, 'w', zipfile.ZIP_STORED) as zipf:
             
             # 1. Add Scripts
             for src_rel, arcname in files_to_copy.items():
@@ -912,30 +914,35 @@ MacOS:   sudo bash ./Platforms/Mac/Uninstall-SSH-Mac.sh
                 
                 if os.path.exists(src):
                     zipf.write(src, arcname)
-                    # Note: We lose the explicit 'chmod +x' here for POSIX inside zip, 
-                    # but unzip usually respects the source permissions or user runs with 'bash' anyway.
-                    # To be safe, we can manually set external_attr if needed, but standard write is usually fine.
                 else:
                     print(f"{Style.RED}❌ Error: Script '{src_rel}' not found.{Style.RESET}")
                 
                 current_op += 1
                 elapsed = time.time() - t_start
-                # import time; time.sleep(0.05) # Delay not needed if we want SPEED now
-                print_progress_bar(current_op, total_ops, prefix='Zipping:', suffix=f'({elapsed:.1f}s)', length=30)
+                print_progress_bar(current_op, total_ops, prefix='Compiling:', suffix=f'({elapsed:.1f}s)', length=30)
 
             # 2. Add Payload
             if has_payload:
                 zipf.write(payload_path, payload_name)
                 current_op += 1
                 elapsed = time.time() - t_start
-                print_progress_bar(current_op, total_ops, prefix='Zipping:', suffix=f'({elapsed:.1f}s)', length=30)
+                print_progress_bar(current_op, total_ops, prefix='Compiling:', suffix=f'({elapsed:.1f}s)', length=30)
             else:
                  print(f"{Style.YELLOW}⚠️  Warning: Payload not found.{Style.RESET}")
 
             # 3. Add Readme (from memory)
             zipf.writestr("README_INSTALL.txt", readme_content.strip())
             current_op += 1
-            print_progress_bar(current_op, total_ops, prefix='Zipping:', suffix='Complete', length=30)
+            print_progress_bar(current_op, total_ops, prefix='Compiling:', suffix='Complete', length=30)
+
+        # 5. Flush to Disk (Atomic Write)
+        zip_name = f"Deploy-Package-{device_name}.zip"
+        zip_path = os.path.join(output_dir, zip_name)
+        
+        print(f"\n   💾 Writing to disk...", end="")
+        with open(zip_path, "wb") as f:
+            f.write(mem_zip.getvalue())
+        print(" Done.")
 
         total_time = time.time() - t_start
         print_success(f"Package Created: {zip_path} in {total_time:.2f}s")
