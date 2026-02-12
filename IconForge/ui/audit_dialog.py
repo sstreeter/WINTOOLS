@@ -6,9 +6,10 @@ from PyQt6.QtWidgets import (
 class AuditReportDialog(QDialog):
     """Dialog to show icon audit results."""
     
-    def __init__(self, issues, parent=None):
+    def __init__(self, issues, comparison_stats=None, parent=None):
         super().__init__(parent)
         self.issues = issues
+        self.comparison_stats = comparison_stats
         self.setup_ui()
         
     def setup_ui(self):
@@ -78,6 +79,28 @@ class AuditReportDialog(QDialog):
         scroll.setWidget(content_widget)
         layout.addWidget(scroll)
         
+        if self.comparison_stats:
+            comp_group = QGroupBox("Comparison Analysis (Vs Reference)")
+            comp_layout = QVBoxLayout()
+            
+            # Sharpness
+            s_diff = self.comparison_stats['sharpness_diff'] # Yours - Ref
+            s_color = "green" if s_diff >= -10 else "orange" if s_diff >= -30 else "red"
+            comp_layout.addWidget(QLabel(f"Sharpness: Yours ({self.comparison_stats['yours']['sharpness']}) vs Ref ({self.comparison_stats['ref']['sharpness']})"))
+            
+            # Contrast
+            c_diff = self.comparison_stats['contrast_diff']
+            c_color = "green" if abs(c_diff) < 20 else "orange"  
+            comp_layout.addWidget(QLabel(f"Contrast: Yours ({self.comparison_stats['yours']['contrast']}) vs Ref ({self.comparison_stats['ref']['contrast']})"))
+            
+            # Palette
+            p_yours = self.comparison_stats['yours']['palette_size']
+            p_ref = self.comparison_stats['ref']['palette_size']
+            comp_layout.addWidget(QLabel(f"Palette Size: {p_yours} colors (Ref: {p_ref})"))
+            
+            comp_group.setLayout(comp_layout)
+            layout.addWidget(comp_group)
+            
         # Summary
         if has_errors:
             summary = "❌ Errors detected. Please fix before exporting."

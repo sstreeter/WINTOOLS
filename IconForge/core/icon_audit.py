@@ -113,3 +113,76 @@ class IconAuditor:
              issues.append(AuditIssue("Cleanliness", IssueSeverity.PASS, "No dirty pixels detected"))
              
         return issues
+
+    @staticmethod
+    def analyze_metrics(image: Image.Image) -> dict:
+        """
+        Calculate numeric quality metrics for comparison.
+        Returns normalized scores (0-100) or raw values.
+        """
+        if image.mode != 'RGBA':
+            image = image.convert('RGBA')
+            
+        # Convert to grayscale for structural analysis
+        gray = image.convert('L')
+        # Convert to numpy
+        img_arr = np.array(image)
+        gray_arr = np.array(gray)
+        alpha = np.array(image.split()[3])
+        
+        metrics = {}
+        
+        # 1. Sharpness (Gradient Magnitude / Laplacian Variance)
+        # Simple approach: Variance of Laplacian (Blur detection)
+        # Higher is sharper.
+        if alpha.max() == 0:
+             metrics['sharpness'] = 0
+             metrics['contrast'] = 0
+        else:
+            # Mask out transparent background from stats?
+            # Ideally yes, but determining edges on transparent background is tricky.
+            # Let's simple check variance of the gray image where alpha > 0
+            
+            # Laplacian Kernel
+            kernel = np.array([[0, -1, 0], [-1, 4, -1], [0, -1, 0]])
+            from scipy.signal import convolve2d
+            # If scipy not avail, use simple gradient
+            # Fallback to simple gradient sum
+            
+            # Simple Gradient: Sum of diff between neighbors
+            dy, dx = np.gradient(gray_arr)
+            grad_mag = np.sqrt(dx**2 + dy**2)
+            
+            # Average gradient of NON-TRANSPARENT pixels
+            mask = alpha > 10
+            if mask.sum() > 0:
+                score = np.mean(grad_mag[mask])
+                # Normalize? 0-20 is blur, >50 is sharp.
+                metrics['sharpness'] = round(min(score * 2, 100), 1)
+            else:
+                metrics['sharpness'] = 0
+                
+        # 2. Contrast (Dynamic Range)
+        if mask.sum() > 0:
+             pixels = gray_arr[mask]
+             metrics['contrast'] = round(np.std(pixels), 1) # Std Dev
+             metrics['brightness'] = round(np.mean(pixels), 1)
+        else:
+             metrics['contrast'] = 0
+             metrics['brightness'] = 0
+             
+        # 3. Palette Complexity
+        # Count unique colors
+        # Quantize to reduce noise?
+        # Let's count unique RGB tuples where Alpha > 0
+        visible_pixels = img_arr[mask]
+        if len(visible_pixels) > 0:
+            # Axis 0 is pixel count. We want unique rows.
+            # This can be slow for large images.
+            # Fast way:
+            unique_colors = len(np.unique(visible_pixels, axis=0))
+            metrics['palette_size'] = unique_colors
+        else:
+            metrics['palette_size'] = 0
+            
+        return metrics

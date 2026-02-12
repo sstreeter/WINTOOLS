@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QLabel, QFileDialog, QGroupBox, QRadioButton, QCheckBox,
     QSlider, QLineEdit, QProgressBar, QMessageBox, QColorDialog,
-    QSpinBox, QTabWidget, QComboBox, QScrollArea
+    QSpinBox, QTabWidget, QComboBox, QScrollArea, QSplitter
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QPixmap, QImage, QDragEnterEvent, QDropEvent
@@ -16,8 +16,11 @@ import sys
 
 from core import ImageProcessor, AutoCropper, MaskingEngine, IconExporter, EdgeProcessor, BorderMasking, CompositionEngine
 from core.stroke import StrokeGenerator, SuperPolisher
-from core.icon_audit import IconAuditor
+from core.filters import FilterEngine
+from core.icon_audit import IconAuditor, IssueSeverity
+from core.icon_audit import IconAuditor, IssueSeverity
 from ui.audit_dialog import AuditReportDialog
+from ui.styles import MODERN_STYLESHEET
 from ui.widgets import TransparencyLabel
 from utils import ArchiveManager
 
@@ -116,161 +119,183 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.processor = ImageProcessor()
         self.current_mask_color = (255, 255, 255)
-        self.current_mask_color_2 = (255, 255, 255) # Secondary Key (Phase 9)
+        self.processor = ImageProcessor()
+        self.reference_image = None # Phase 21: Reference Comparison
+        self.reference_pixmap = None
+        self.current_mask_color = (255, 255, 255)
         self.init_ui()
     
     def init_ui(self):
-        """Initialize the user interface."""
+        """Initialize the modern user interface."""
         self.setWindowTitle("IconForge - Professional Edition")
-        self.setMinimumSize(900, 700)
+        self.setMinimumSize(1200, 850) # Wider default
+        self.setStyleSheet(MODERN_STYLESHEET)
         
         # Central widget
         central = QWidget()
         self.setCentralWidget(central)
         
-        # Main layout
-        layout = QVBoxLayout(central)
+        # Main layout (Split View with QSplitter)
+        main_layout = QHBoxLayout(central)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
         
-        # Top section: Studio Layer (Dual Canvas)
-        studio_layout = QHBoxLayout()
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter.setHandleWidth(2)
+        # Style the handle? It's tricky with QSS but doable in theory. 
+        # For now rely on standard look or minimal style.
+        self.splitter.setStyleSheet("QSplitter::handle { background-color: #3e3e42; }")
         
-        # Left: Source Inspector
-        self.source_group = self.create_source_inspector_v2()
-        studio_layout.addWidget(self.source_group, 1)
+        main_layout.addWidget(self.splitter)
         
-        # Right: Artboard
-        self.artboard_group = self.create_artboard()
-        studio_layout.addWidget(self.artboard_group, 1)
+        # --- LEFT PANEL: CONTROLS (Scrollable) ---
+        control_container = QWidget()
+        # control_container.setFixedWidth(400) # REMOVED: Let splitter handle width
+        control_container.setMinimumWidth(320) # Minimum usable width
+        control_container.setStyleSheet("background-color: #252526; border-right: 1px solid #3e3e42;")
         
-        layout.addLayout(studio_layout)
+        control_layout = QVBoxLayout(control_container)
+        control_layout.setContentsMargins(0,0,0,0)
         
-        # Middle section: Tabbed Settings
-        self.tabs = QTabWidget()
+        # Scroll Area for Controls
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         
-        # Tab 1: Cleanup (Masking & Advanced Edge)
-        self.masking_tab = QWidget()
-        mask_tab_layout = QVBoxLayout()
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setSpacing(20)
+        scroll_layout.setContentsMargins(15, 15, 15, 15)
+        
+        # 1. Header
+        header = QLabel("ICON FORGE")
+        header.setObjectName("Header")
+        scroll_layout.addWidget(header)
+        
+        # 2. Source Inspector (Input)
+        # We'll use a simplified version for the sidebar
+        self.source_group = self.create_source_inspector()
+        scroll_layout.addWidget(self.source_group)
+        
+        # 3. Quick Enhancements (Prep)
+        enhance_group = self.create_quick_enhance_panel()
+        scroll_layout.addWidget(enhance_group)
+        
+        # 4. Cleanup (Masking)
         masking_group = self.create_masking_panel()
-        mask_tab_layout.addWidget(masking_group)
-        mask_tab_layout.addStretch() # Push to top
-        self.masking_tab.setLayout(mask_tab_layout)
-        self.tabs.addTab(self.masking_tab, "1. Cleanup")
+        scroll_layout.addWidget(masking_group)
         
-        # Tab 2: Geometry (Enforcer)
-        self.geometry_tab = QWidget()
-        geo_tab_layout = QVBoxLayout()
+        # 5. Geometry (Enforcer)
         geometry_group = self.create_geometry_panel()
-        geo_tab_layout.addWidget(geometry_group)
-        geo_tab_layout.addStretch()
-        self.geometry_tab.setLayout(geo_tab_layout)
-        self.tabs.addTab(self.geometry_tab, "2. Geometry (Enforcer)")
+        scroll_layout.addWidget(geometry_group)
         
-        # Tab 3: Composition & Effects (Phase 16 & 8)
-        self.stroke_tab = QWidget()
-        stroke_tab_layout = QVBoxLayout()
+        # 6. Composition (Fit)
+        comp_group = self.create_composition_panel()
+        scroll_layout.addWidget(comp_group)
         
-        # 3.1 Smart Composition (Fit & Padding)
-        composition_group = self.create_composition_panel()
-        stroke_tab_layout.addWidget(composition_group)
-        
-        # 3.2 Stroke Engine
+        # 7. Effects (Stroke/Polish)
         stroke_group = self.create_stroke_panel()
-        stroke_tab_layout.addWidget(stroke_group)
+        scroll_layout.addWidget(stroke_group)
         
-        stroke_tab_layout.addStretch()
-        self.stroke_tab.setLayout(stroke_tab_layout)
-        self.tabs.addTab(self.stroke_tab, "3. Composition & Effects")
-        
-        # Tab 4: Export (Moved)
-        self.export_tab = QWidget()
-        export_tab_layout = QVBoxLayout()
+        # 8. Export (Output)
         export_group = self.create_export_panel()
-        export_tab_layout.addWidget(export_group)
-        export_tab_layout.addStretch()
-        self.export_tab.setLayout(export_tab_layout)
-        self.tabs.addTab(self.export_tab, "4. Export")
+        # We need to manually add the Generate button inside or near this group
+        # Let's add it to the bottom of the scroll layout
+        scroll_layout.addWidget(export_group)
         
-        layout.addWidget(self.tabs)
-        
-        # Icon name
-        name_layout = QHBoxLayout()
-        name_layout.addWidget(QLabel("Icon Name:"))
-        self.icon_name_input = QLineEdit()
-        self.icon_name_input.setPlaceholderText("Enter icon name (defaults to source filename)")
-        name_layout.addWidget(self.icon_name_input)
-        layout.addLayout(name_layout)
-        
-        # Output directory
-        output_layout = QHBoxLayout()
-        output_layout.addWidget(QLabel("Output:"))
-        self.output_path = QLineEdit(str(Path.home() / "Desktop" / "icons"))
-        output_layout.addWidget(self.output_path)
-        browse_btn = QPushButton("Browse...")
-        browse_btn.clicked.connect(self.browse_output)
-        output_layout.addWidget(browse_btn)
-        layout.addLayout(output_layout)
-        
-        # Progress bar
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
-        layout.addWidget(self.progress_bar)
-        
-        # Generate button
-        self.generate_btn = QPushButton("Generate Icons")
+        # Generate Button (Big)
+        self.generate_btn = QPushButton("🚀 GENERATE ICONS")
         self.generate_btn.setMinimumHeight(50)
+        self.generate_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.generate_btn.setStyleSheet("font-size: 14px; font-weight: bold; background-color: #007acc;")
         self.generate_btn.setEnabled(False)
         self.generate_btn.clicked.connect(self.generate_icons)
-        layout.addWidget(self.generate_btn)
+        scroll_layout.addWidget(self.generate_btn)
+        # Progress Bar (Phase 2)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        self.progress_bar.setStyleSheet("QProgressBar { height: 8px; border-radius: 4px; } QProgressBar::chunk { background-color: #007acc; border-radius: 4px; }")
+        scroll_layout.addWidget(self.progress_bar)
+        
+        scroll_layout.addStretch() # Push everything up
+        
+        scroll.setWidget(scroll_content)
+        control_layout.addWidget(scroll)
+        
+        # Add Control Panel to Splitter
+        self.splitter.addWidget(control_container)
+        
+        # --- RIGHT PANEL: PREVIEW (Sticky) ---
+        preview_container = QWidget()
+        preview_container.setStyleSheet("background-color: #1e1e1e;")
+        preview_layout = QVBoxLayout(preview_container)
+        preview_layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Artboard (Reused)
+        self.artboard_group = self.create_artboard()
+        # Ensure artboard expands
+        self.preview_scroll.setStyleSheet("QScrollArea { background-color: #1e1e1e; border: none; }") 
+        preview_layout.addWidget(self.artboard_group)
+        
+        # Add Preview Panel to Splitter
+        self.splitter.addWidget(preview_container)
+        
+        # Set Initial Sizes (420px for controls - wider default)
+        self.splitter.setSizes([420, 780])
+        self.splitter.setCollapsible(0, False) # Keep controls visible
         
         # Enable drag and drop
         self.setAcceptDrops(True)
     
-    def create_source_inspector(self):
-        """Create the Source Inspector panel (Left Canvas)."""
-        group = QGroupBox("Source Inspector (Original)")
-        layout = QVBoxLayout()
-        
-        # Source viewing area (custom styled)
-        # Source viewing area (custom styled)
-        self.drop_label = TransparencyLabel()
-        self.drop_label.setText("Drop Source Image Here")
-        self.drop_label.setMinimumSize(300, 300)
-        # We don't need stylesheet border/bg anymore as TransparencyLabel handles it
-        layout.addWidget(self.drop_label, 1) # Stretch 1 to fill space
-        
-        # Info readout
-        self.source_info_label = QLabel("No image loaded")
-        self.source_info_label.setStyleSheet("color: #666; font-size: 11px;")
-        layout.addWidget(self.source_info_label)
-        
-        # Action Bar
-        action_layout = QHBoxLayout()
-        choose_btn = QPushButton("📂 Open...")
-        choose_btn.clicked.connect(self.choose_file)
-        action_layout.addWidget(choose_btn)
-        
-        self.check_btn = QPushButton("🩺 Check Icon")
-        self.check_btn.setToolTip("Run Icon Doctor Audit")
-        self.check_btn.setEnabled(False)
-        self.check_btn.clicked.connect(self.run_icon_audit)
-        action_layout.addWidget(self.check_btn)
-        
-        # Commit Button (Phase 7)
-        self.commit_btn = QPushButton("⬆ Commit Changes")
-        self.commit_btn.setToolTip("Use current Preview as the Source Image (Bake Effects)")
-        self.commit_btn.clicked.connect(self.promote_preview_to_source)
-        # self.commit_btn.setEnabled(False) # Logic could enable this only when changes made
-        action_layout.addWidget(self.commit_btn)
-        
-        layout.addLayout(action_layout)
-        
-        group.setLayout(layout)
-        return group
+
     
     def create_artboard(self):
         """Create the Artboard panel (Right Canvas)."""
         group = QGroupBox("Artboard (Live Preview)")
         layout = QVBoxLayout()
+        
+        # --- VIEW TOOLBAR ---
+        view_toolbar = QHBoxLayout()
+        view_toolbar.setContentsMargins(0, 0, 0, 0)
+        view_toolbar.setSpacing(15)
+        
+        view_label = QLabel("View Mode:")
+        view_label.setStyleSheet("color: #888; font-weight: bold;")
+        view_toolbar.addWidget(view_label)
+        
+        self.btn_view_live = QRadioButton("Live Result")
+        self.btn_view_live.setChecked(True)
+        self.btn_view_live.clicked.connect(lambda: self.set_view_mode("live"))
+        view_toolbar.addWidget(self.btn_view_live)
+        
+        self.btn_view_source = QRadioButton("Source Input")
+        self.btn_view_source.clicked.connect(lambda: self.set_view_mode("source"))
+        view_toolbar.addWidget(self.btn_view_source)
+        
+        self.btn_view_split = QRadioButton("Split Compare")
+        self.btn_view_split.setEnabled(False) # Enabled when Ref loaded
+        self.btn_view_split.clicked.connect(lambda: self.set_view_mode("split"))
+        view_toolbar.addWidget(self.btn_view_split)
+        
+        # Load Ref Button
+        self.btn_load_ref = QPushButton("📂 Ref")
+        self.btn_load_ref.setFixedWidth(60)
+        self.btn_load_ref.setToolTip("Load Reference Image for Comparison")
+        self.btn_load_ref.clicked.connect(self.load_reference_image)
+        view_toolbar.addWidget(self.btn_load_ref)
+        
+        # Split Slider (Wipe)
+        self.split_slider = QSlider(Qt.Orientation.Horizontal)
+        self.split_slider.setRange(0, 100)
+        self.split_slider.setValue(50)
+        self.split_slider.setFixedWidth(100)
+        self.split_slider.setVisible(False)
+        self.split_slider.setToolTip("Wipe: Left = Reference, Right = Result")
+        self.split_slider.valueChanged.connect(lambda: self.refresh_viewport())
+        view_toolbar.addWidget(self.split_slider)
+        
+        view_toolbar.addStretch()
+        layout.addLayout(view_toolbar)
         
         # Artboard viewing area (Zoomable Viewport)
         self.preview_scroll = QScrollArea()
@@ -566,28 +591,58 @@ class MainWindow(QMainWindow):
         return group
     
     def create_export_panel(self):
-        """Create export options panel."""
-        group = QGroupBox("Export Options")
-        layout = QHBoxLayout()
+        """Create export options panel with Output settings."""
+        group = QGroupBox("Export Settings")
+        layout = QVBoxLayout()
         
-        self.export_windows = QCheckBox("Windows ICO")
+        # 1. Output Path & Name
+        # Icon Name
+        name_layout = QHBoxLayout()
+        name_layout.addWidget(QLabel("Name:"))
+        self.icon_name_input = QLineEdit()
+        self.icon_name_input.setPlaceholderText("Auto (Source Filename)")
+        name_layout.addWidget(self.icon_name_input)
+        layout.addLayout(name_layout)
+        
+        # Output Directory
+        dir_layout = QHBoxLayout()
+        dir_layout.addWidget(QLabel("Output:"))
+        self.output_path = QLineEdit(str(Path.home() / "Desktop" / "icons"))
+        dir_layout.addWidget(self.output_path)
+        browse_btn = QPushButton("...")
+        browse_btn.setFixedWidth(30)
+        browse_btn.clicked.connect(self.browse_output)
+        dir_layout.addWidget(browse_btn)
+        layout.addLayout(dir_layout)
+        
+        layout.addSpacing(10)
+        
+        # 2. Formats
+        formats_label = QLabel("Formats:")
+        formats_label.setObjectName("SubHeader")
+        layout.addWidget(formats_label)
+        
+        formats_layout = QVBoxLayout() # Vertical stack for clean look
+        
+        self.export_windows = QCheckBox("Windows ICO (.ico)")
         self.export_windows.setChecked(True)
-        layout.addWidget(self.export_windows)
+        formats_layout.addWidget(self.export_windows)
         
-        self.export_mac = QCheckBox("Mac ICNS")
+        self.export_mac = QCheckBox("Mac ICNS (.icns)")
         self.export_mac.setChecked(True)
-        layout.addWidget(self.export_mac)
+        formats_layout.addWidget(self.export_mac)
         
-        self.export_png = QCheckBox("PNG Set")
+        self.export_png = QCheckBox("PNG Set (16px - 1024px)")
         self.export_png.setChecked(True)
-        layout.addWidget(self.export_png)
+        formats_layout.addWidget(self.export_png)
         
-        self.create_archive = QCheckBox("Create Archive")
+        self.create_archive = QCheckBox("Create ZIP Archive")
         self.create_archive.setChecked(True)
-        layout.addWidget(self.create_archive)
+        formats_layout.addWidget(self.create_archive)
+        
+        layout.addLayout(formats_layout)
         
         layout.addStretch()
-        group.setLayout(layout)
         group.setLayout(layout)
         return group
         
@@ -833,6 +888,53 @@ class MainWindow(QMainWindow):
         
         group.setLayout(layout)
         return group
+        
+    def create_quick_enhance_panel(self):
+        """Create Quick Enhancements panel (Checkbox Style)."""
+        group = QGroupBox("Quick Enhancements (Prep)")
+        # User requested: Enhance, Sharpen, Antialias, Despeckle, Equalize, Normalize
+        layout = QHBoxLayout()
+        
+        # 1. Enhance (Auto Contrast - Cutoff 2%)
+        self.chk_enhance = QCheckBox("Enhance")
+        self.chk_enhance.setToolTip("Auto Contrast (Maximize Tone, 2% Cutoff)")
+        self.chk_enhance.toggled.connect(self.apply_masking)
+        layout.addWidget(self.chk_enhance)
+        
+        # 2. Sharpen
+        self.chk_sharpen = QCheckBox("Sharpen")
+        self.chk_sharpen.setToolTip("Basic Sharpen Filter")
+        self.chk_sharpen.toggled.connect(self.apply_masking)
+        layout.addWidget(self.chk_sharpen)
+        
+        # 3. Antialias (Smooth)
+        self.chk_antialias = QCheckBox("Antialias")
+        self.chk_antialias.setToolTip("Smooth jagged edges")
+        self.chk_antialias.setChecked(False) # User source has checked? Let's leave unchecked for now to be safe
+        self.chk_antialias.toggled.connect(self.apply_masking)
+        layout.addWidget(self.chk_antialias)
+        
+        # 4. Despeckle (Median)
+        self.chk_despeckle = QCheckBox("Despeckle")
+        self.chk_despeckle.setToolTip("Remove noise (Median Filter)")
+        self.chk_despeckle.toggled.connect(self.apply_masking)
+        layout.addWidget(self.chk_despeckle)
+        
+        # 5. Equalize
+        self.chk_equalize = QCheckBox("Equalize")
+        self.chk_equalize.setToolTip("Histogram Equalization")
+        self.chk_equalize.toggled.connect(self.apply_masking)
+        layout.addWidget(self.chk_equalize)
+        
+        # 6. Normalize (Auto Contrast - Full Range)
+        self.chk_normalize = QCheckBox("Normalize")
+        self.chk_normalize.setToolTip("Stretch contrast to full range (No Cutoff)")
+        self.chk_normalize.toggled.connect(self.apply_masking)
+        layout.addWidget(self.chk_normalize)
+        
+        layout.addStretch()
+        group.setLayout(layout)
+        return group
     
     def update_ui_state(self):
         """Update UI state based on settings."""
@@ -857,7 +959,7 @@ class MainWindow(QMainWindow):
             self,
             "Choose Image",
             "",
-            "Images (*.png *.jpg *.jpeg *.bmp *.gif *.svg)"
+            "Images (*.png *.jpg *.jpeg *.bmp *.gif *.svg *.eps *.pdf *.ai)"
         )
         if file_path:
             self.load_image(file_path)
@@ -870,7 +972,8 @@ class MainWindow(QMainWindow):
             
             # Update Info Label
             w, h = self.processor.source_image.size
-            self.source_info_label.setText(f"File: {file_name} | Size: {w}x{h}")
+            self.filename_label.setText(file_name)
+            self.res_label.setText(f"{w}x{h} px")
             
             self.load_source_preview()
             
@@ -887,15 +990,17 @@ class MainWindow(QMainWindow):
             self.reset_ui_controls_after_commit()
             
             # Phase 11: Auto-Audit (Instant Feedback)
+            # Phase 11: Auto-Audit (Instant Feedback)
             issues = IconAuditor.audit_image(self.processor.source_image)
+            # Filter to relevant issues (Warning/Error)
+            relevant_issues = [i for i in issues if i.severity in [IssueSeverity.WARNING, IssueSeverity.ERROR]]
+            
             if hasattr(self, 'approval_status_label'):
-                if not issues:
+                if not relevant_issues:
                     self.approval_status_label.setText("✅ Source is Clean")
                     self.approval_status_label.setStyleSheet("color: green; font-weight: bold;")
-                    # Optional: Disable Auto-Fix if clean? 
-                    # self.check_btn.setEnabled(False) # Maybe let them check anyway
                 else:
-                    count = len(issues)
+                    count = len(relevant_issues)
                     self.approval_status_label.setText(f"⚠️ {count} Issues Found")
                     self.approval_status_label.setStyleSheet("color: red; font-weight: bold;")
             
@@ -907,7 +1012,7 @@ class MainWindow(QMainWindow):
             self.update_preview()
 
     def load_source_preview(self):
-        """Update the Source Inspector with the current source image."""
+        """Cache the Source Inspector pixmap."""
         if not self.processor.source_image:
             return
             
@@ -920,14 +1025,9 @@ class MainWindow(QMainWindow):
             
         data = src_img.tobytes('raw', 'RGBA')
         qimage = QImage(data, w, h, QImage.Format.Format_RGBA8888)
-        pixmap = QPixmap.fromImage(qimage)
-        
-        # Scale to fit label (Keep Aspect Ratio)
-        # Max size 300x300 roughly based on layout
-        pixmap = pixmap.scaled(300, 300, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-        
-        self.drop_label.setPixmap(pixmap)
-        self.drop_label.setText("") # Clear text
+        self.source_pixmap = QPixmap.fromImage(qimage)
+        # We don't display it immediately anymore, 
+        # unless View Mode is 'Source' (which set_view_mode handles)
             
 
     
@@ -939,6 +1039,35 @@ class MainWindow(QMainWindow):
         # Reset to source
         self.processor.reset_to_source()
         img = self.processor.processed_image
+        
+        # 0. Quick Enhancements (Prep)
+        # Applied BEFORE masking to improve separation
+        if hasattr(self, 'chk_despeckle') and self.chk_despeckle.isChecked():
+             img = FilterEngine.despeckle(img)
+             
+        if hasattr(self, 'chk_equalize') and self.chk_equalize.isChecked():
+             img = FilterEngine.equalize(img)
+             
+        if hasattr(self, 'chk_enhance') and self.chk_enhance.isChecked():
+             # Auto-Contrast with 2% cutoff
+             img = FilterEngine.auto_contrast(img, cutoff=2)
+             
+        if hasattr(self, 'chk_normalize') and self.chk_normalize.isChecked():
+             # Auto-Contrast with 0% cutoff (Full Range)
+             img = FilterEngine.auto_contrast(img, cutoff=0)
+        
+        if hasattr(self, 'chk_sharpen') and self.chk_sharpen.isChecked():
+             img = FilterEngine.sharpen(img)
+             
+        if hasattr(self, 'chk_antialias') and self.chk_antialias.isChecked():
+             img = FilterEngine.smooth(img)
+             
+        if hasattr(self, 'chk_grayscale') and self.chk_grayscale.isChecked():
+             img = FilterEngine.grayscale(img)
+             
+        # Apply changes to processor flow before masking
+        # (This is tricky because processor.processed_image is what we're editing)
+        # We just keep 'img' variable flowing.
         
         # Apply basic masking
         if self.mask_autocrop.isChecked():
@@ -1012,14 +1141,17 @@ class MainWindow(QMainWindow):
                  img = EdgeProcessor.expand_mask(img, pixels=shape_weight)
         
         # Phase 20: Border Engine (Colored Stroke)
-        if hasattr(self, 'border_group') and self.border_group.isChecked():
+        # Phase 20: Border Engine (Colored Stroke)
+        # Check specific checkbox, not group (group just holds it)
+        if hasattr(self, 'border_enabled_check') and self.border_enabled_check.isChecked():
             color = self.current_stroke_color
-            width = self.stroke_width_slider.value()
-            align_idx = self.stroke_align_combo.currentIndex()
-            align_map = {0: 'outside', 1: 'center', 2: 'inside'}
-            alignment = align_map.get(align_idx, 'outside')
-            
-            img = StrokeGenerator.apply_stroke(img, color, width, alignment)
+            if hasattr(self, 'stroke_width_slider'):
+                width = self.stroke_width_slider.value()
+                align_idx = self.stroke_align_combo.currentIndex()
+                align_map = {0: 'outside', 1: 'center', 2: 'inside'}
+                alignment = align_map.get(align_idx, 'outside')
+                
+                img = StrokeGenerator.apply_stroke(img, color, width, alignment)
             
         # Phase 20: Liquid Polish (Super-Sampled Smoothing)
         if hasattr(self, 'liquid_polish_check') and self.liquid_polish_check.isChecked():
@@ -1192,11 +1324,32 @@ class MainWindow(QMainWindow):
         if not self.processor.processed_image:
             return
             
-        # Run audit
+        # Run standard audit
         issues = IconAuditor.audit_image(self.processor.processed_image)
         
+        # Run Comparative Audit if Reference is loaded
+        comp_stats = None
+        if hasattr(self, 'reference_image') and self.reference_image:
+            try:
+                # 1. Analyze Both
+                processed_img = self.processor.processed_image
+                ref_img = self.reference_image.resize(processed_img.size, Image.Resampling.LANCZOS)
+                
+                stats_yours = IconAuditor.analyze_metrics(processed_img)
+                stats_ref = IconAuditor.analyze_metrics(ref_img)
+                
+                # 2. Calculate Diffs
+                comp_stats = {
+                    'yours': stats_yours,
+                    'ref': stats_ref,
+                    'sharpness_diff': stats_yours['sharpness'] - stats_ref['sharpness'],
+                    'contrast_diff': stats_yours['contrast'] - stats_ref['contrast']
+                }
+            except Exception as e:
+                print(f"Comparison failed: {e}")
+        
         # Show report
-        dialog = AuditReportDialog(issues, self)
+        dialog = AuditReportDialog(issues, comparison_stats=comp_stats, parent=self)
         if dialog.exec():
             # If user clicked "Auto-Fix All"
             # Apply Smart Edge Cleanup
@@ -1341,11 +1494,15 @@ class MainWindow(QMainWindow):
             return
             
         # Phase 21: Audit Check (Alert only at the end)
+        # Phase 21: Audit Check (Alert only at the end)
         issues = IconAuditor.audit_image(self.processor.processed_image)
-        if issues:
-            count = len(issues)
+        # Filter to relevant issues (Warning/Error)
+        relevant_issues = [i for i in issues if i.severity in [IssueSeverity.WARNING, IssueSeverity.ERROR]]
+        
+        if relevant_issues:
+            count = len(relevant_issues)
             msg = f"Found {count} potential issues with your icon:\n\n"
-            for issue in issues[:3]:
+            for issue in relevant_issues[:3]:
                 msg += f"- {issue.message}\n"
             if count > 3:
                 msg += f"...and {count-3} more.\n"
@@ -1441,81 +1598,77 @@ class MainWindow(QMainWindow):
         
         QMessageBox.information(self, "Reloaded", "File reloaded from disk.\nMasking and Filters have been reset to match the new pixels.")
 
-    def create_source_inspector_v2(self):
-        """Phase 11: Updated Source Inspector (Escape Hatch & Feedback)."""
-        group = QGroupBox("Source Inspector (Original)")
+    def create_source_inspector(self):
+        """Create Compact Input Settings Panel."""
+        group = QGroupBox("Input Source")
         layout = QVBoxLayout()
         
-        # Status Bar
-        status_layout = QHBoxLayout()
-        self.approval_status_label = QLabel("Waiting for Source...")
-        self.approval_status_label.setStyleSheet("color: #666; font-weight: bold;")
-        self.approval_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        status_layout.addWidget(self.approval_status_label)
-        layout.addLayout(status_layout)
+        # Row 1: File Info (Icon + Name + Resolution)
+        info_layout = QHBoxLayout()
         
-        # Source viewing area
-        self.drop_label = TransparencyLabel()
-        self.drop_label.setText("Drop Source Image Here")
-        self.drop_label.setMinimumSize(300, 300)
-        # Skew Fix: Force Center, No Scale
-        self.drop_label.setScaledContents(False) 
-        self.drop_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.drop_label, 1) # Stretch 1
+        self.source_icon_label = QLabel()
+        self.source_icon_label.setFixedSize(32, 32)
+        self.source_icon_label.setStyleSheet("background-color: #333; border-radius: 4px;")
+        info_layout.addWidget(self.source_icon_label)
         
-        # Info readout
-        self.source_info_label = QLabel("No image loaded")
-        self.source_info_label.setStyleSheet("color: #666; font-size: 11px;")
-        layout.addWidget(self.source_info_label)
+        meta_layout = QVBoxLayout()
+        self.filename_label = QLabel("No File Loaded")
+        self.filename_label.setStyleSheet("font-weight: bold; color: #ddd;")
+        meta_layout.addWidget(self.filename_label)
         
-        # History / Version Control (Phase 13)
-        history_layout = QHBoxLayout()
-        history_layout.addWidget(QLabel("Version:"))
-        self.history_combo = QComboBox()
-        self.history_combo.addItem("Current (Latest)")
-        self.history_combo.setEnabled(False)
-        self.history_combo.currentIndexChanged.connect(self.load_history_version)
-        history_layout.addWidget(self.history_combo, 1) # Stretch
-        layout.addLayout(history_layout)
+        self.res_label = QLabel("Drag & Drop Image")
+        self.res_label.setStyleSheet("color: #888; font-size: 11px;")
+        meta_layout.addWidget(self.res_label)
         
-        # Action Bar 1: Load/External
+        info_layout.addLayout(meta_layout)
+        info_layout.addStretch()
+        layout.addLayout(info_layout)
+        
+        layout.addSpacing(5)
+        
+        # Row 2: Actions
         action_layout = QHBoxLayout()
-        choose_btn = QPushButton("📂 Open")
-        choose_btn.clicked.connect(self.choose_file)
-        action_layout.addWidget(choose_btn)
         
-        self.reveal_btn = QPushButton("🔎 Reveal")
-        self.reveal_btn.setToolTip("Show in Finder/Explorer for Photoshop editing")
-        self.reveal_btn.setEnabled(False)
-        self.reveal_btn.clicked.connect(self.reveal_source_file)
-        action_layout.addWidget(self.reveal_btn)
+        btn_open = QPushButton("Open...")
+        btn_open.setToolTip("Open Source File")
+        btn_open.clicked.connect(self.choose_file)
+        action_layout.addWidget(btn_open)
         
-        self.reload_btn = QPushButton("🔄 Reload")
-        self.reload_btn.setToolTip("Reload file from disk (after external edit)")
+        self.reload_btn = QPushButton("Reload")
+        self.reload_btn.setToolTip("Reload from Disk")
         self.reload_btn.setEnabled(False)
         self.reload_btn.clicked.connect(self.reload_source_file)
         action_layout.addWidget(self.reload_btn)
         
-        layout.addLayout(action_layout)
-        
-        # Action Bar 2: Audit/Commit
-        audit_layout = QHBoxLayout()
-        
-        self.check_btn = QPushButton("🩺 Check Icon")
+        self.check_btn = QPushButton("Audit")
+        self.check_btn.setToolTip("Check for Issues")
         self.check_btn.setEnabled(False)
         self.check_btn.clicked.connect(self.run_icon_audit)
-        audit_layout.addWidget(self.check_btn)
+        action_layout.addWidget(self.check_btn)
         
-        self.commit_btn = QPushButton("⬆ Commit Changes")
-        self.commit_btn.setToolTip("Save new version to history/ and Reload")
+        layout.addLayout(action_layout)
+        
+        # Row 3: History (Compact)
+        history_layout = QHBoxLayout()
+        history_layout.addWidget(QLabel("Ver:"))
+        self.history_combo = QComboBox()
+        self.history_combo.addItem("Latest")
+        self.history_combo.setEnabled(False)
+        self.history_combo.currentIndexChanged.connect(self.load_history_version)
+        history_layout.addWidget(self.history_combo, 1)
+        
+        # Commit (Small Button)
+        self.commit_btn = QPushButton("💾")
+        self.commit_btn.setFixedSize(24, 24)
+        self.commit_btn.setToolTip("Commit Current Preview as New Source")
         self.commit_btn.clicked.connect(self.promote_preview_to_source)
-        audit_layout.addWidget(self.commit_btn)
+        history_layout.addWidget(self.commit_btn)
         
-        layout.addLayout(audit_layout)
+        layout.addLayout(history_layout)
         
         group.setLayout(layout)
         return group
-        return group
+
 
     def populate_history_combo(self, current_path: str):
         """Populate history dropdown with ALL versions (Unified Timeline)."""
@@ -1558,17 +1711,22 @@ class MainWindow(QMainWindow):
         found_active = False # Initialize explicitly 
         
         # Add matches
+        # Add matches
         for i, v in enumerate(versions):
             item_name = v['name']
             item_path = v['path']
+            self.history_combo.addItem(item_name, item_path)
             
-            if self.history_combo.itemData(i) == str(Path(current_path).absolute()):
-                self.history_combo.setCurrentIndex(i)
-                found_active = True
-                break
-                
+            # Check if this is the current one
+            if item_path == str(Path(current_path).absolute()):
+                 self.history_combo.setCurrentIndex(i)
+                 found_active = True
+                 
         if not found_active:
              # Current file is likely the Original Source (root folder)
+             # Add it at the END or START? Usually original is oldest.
+             # But our list is Newest First.
+             # If "Original" is active, maybe it's not in history folder.
              self.history_combo.addItem(f"Original Source (Active)", str(Path(current_path).absolute()))
              self.history_combo.setCurrentIndex(self.history_combo.count() - 1)
                  
@@ -1627,40 +1785,128 @@ class MainWindow(QMainWindow):
         self.zoom_label.setText(f"{value}%")
         self.refresh_viewport()
 
+    def load_reference_image(self):
+        """Load a reference image for comparison."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open Reference Image", "", 
+            "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp)"
+        )
+        if path:
+            try:
+                img = Image.open(path).convert('RGBA')
+                self.reference_image = img
+                # Pre-calculate pixmap
+                w, h = img.size
+                data = img.tobytes('raw', 'RGBA')
+                qimage = QImage(data, w, h, QImage.Format.Format_RGBA8888)
+                self.reference_pixmap = QPixmap.fromImage(qimage)
+                
+                # Enable Split View
+                self.btn_view_split.setEnabled(True)
+                self.btn_view_split.setChecked(True)
+                self.set_view_mode("split")
+                
+                QMessageBox.information(self, "Reference Loaded", "Reference loaded!\nUse the slider to wipe between Reference (Left) and Result (Right).")
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to load reference: {str(e)}")
+
+    def set_view_mode(self, mode: str):
+        """Switch View Mode (Live, Source, Split)."""
+        # Toggle buttons programmatically if needed
+        if mode == "live":
+            if not self.btn_view_live.isChecked(): self.btn_view_live.setChecked(True)
+            self.split_slider.setVisible(False)
+        elif mode == "source":
+            if not self.btn_view_source.isChecked(): self.btn_view_source.setChecked(True)
+            self.split_slider.setVisible(False)
+        elif mode == "split":
+            if not self.btn_view_split.isChecked(): self.btn_view_split.setChecked(True)
+            self.split_slider.setVisible(True)
+        
+        self.refresh_viewport()
+
     def refresh_viewport(self):
         """Render the current preview pixmap at the correct zoom level."""
-        # 1. Check if we have a base image
-        if not hasattr(self, 'current_preview_pixmap') or not self.current_preview_pixmap:
-             return
-             
-        base_pixmap = self.current_preview_pixmap
+        # 0. Determine Content Source
+        base_pixmap = None
+        is_split = False
         
-        # 2. Determine Target Size
-        if self.btn_fit.isChecked():
-            # Fit Mode: Scale to fit inside Scroll Area
-            # Note: We need to subtract a bit for scrollbars/margins
-            # But scroll area size might change on resize. 
-            # Ideally we process resizeEvent. For now, simple fit.
-            viewport_size = self.preview_scroll.viewport().size()
-            
-            # If viewport is weirdly small (e.g. init), default to 300
-            if viewport_size.width() < 10 or viewport_size.height() < 10:
-                scaled = base_pixmap.scaled(300, 300, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            else:
-                 # Subtract standard padding
-                w = viewport_size.width() - 4
-                h = viewport_size.height() - 4
-                scaled = base_pixmap.scaled(w, h, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-                
+        if self.btn_view_source.isChecked():
+            if hasattr(self, 'source_pixmap'):
+                base_pixmap = self.source_pixmap
+        elif self.btn_view_split.isChecked():
+            # Split Mode
+            is_split = True
+            # Base is Live Result
+            if hasattr(self, 'current_preview_pixmap'):
+                base_pixmap = self.current_preview_pixmap
         else:
-             # Zoom Mode: Scale by factor
-             zoom_factor = self.zoom_slider.value() / 100.0
-             target_w = int(base_pixmap.width() * zoom_factor)
-             target_h = int(base_pixmap.height() * zoom_factor)
-             
-             scaled = base_pixmap.scaled(target_w, target_h, Qt.AspectRatioMode.KeepAspectRatio, 
-                                        Qt.TransformationMode.SmoothTransformation if zoom_factor < 1 else Qt.TransformationMode.FastTransformation)
-                                        
-        self.preview_label.setPixmap(scaled)
-        self.preview_label.adjustSize() # Ensure label fits content
+            # Live Mode (Default)
+            if hasattr(self, 'current_preview_pixmap'):
+                base_pixmap = self.current_preview_pixmap
+        
+        if not base_pixmap:
+             self.preview_label.setText("No Image")
+             return
+        
+        # 2. Determine Target Size (Fit vs Zoom) -> logic remains same per-pixmap
+        if self.btn_fit.isChecked():
+            viewport_size = self.preview_scroll.viewport().size()
+            target_w = viewport_size.width() - 4
+            target_h = viewport_size.height() - 4
+            if target_w < 10: target_w = 300
+            if target_h < 10: target_h = 300
+            
+            scaled_pixmap = base_pixmap.scaled(target_w, target_h, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        else:
+            # Zoom Factor
+            scale = self.zoom_slider.value() / 100.0
+            w = int(base_pixmap.width() * scale)
+            h = int(base_pixmap.height() * scale)
+            scaled_pixmap = base_pixmap.scaled(w, h, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+
+        # 3. Handle Split Rendering (If Split Mode)
+        if is_split and self.reference_pixmap:
+            # We need to compost Reference + Result based on slider
+            # Reference is UNDER? Or Left?
+            # "Wipe" means: Left part is Ref, Right part is Result.
+            
+            # Scale Reference to match Result's display size?
+            # Or just scale it identically.
+            # Let's scale reference to match `scaled_pixmap` dimensions for direct comparison
+            ref_scaled = self.reference_pixmap.scaled(scaled_pixmap.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            
+            # Create a composite QPixmap
+            composite = QPixmap(scaled_pixmap.size())
+            composite.fill(Qt.GlobalColor.transparent)
+            
+            from PyQt6.QtGui import QPainter
+            painter = QPainter(composite)
+            
+            # Draw Reference (Full)
+            # painter.drawPixmap(0, 0, ref_scaled)
+            
+            # Actually, Wipe:
+            # Percentage
+            split_x = int(scaled_pixmap.width() * (self.split_slider.value() / 100.0))
+            
+            # Left side = Reference
+            # Draw Ref cropped to split_x
+            painter.drawPixmap(0, 0, ref_scaled, 0, 0, split_x, ref_scaled.height())
+            
+            # Right side = Result
+            # Draw Result cropped from split_x
+            painter.drawPixmap(split_x, 0, scaled_pixmap, split_x, 0, scaled_pixmap.width() - split_x, scaled_pixmap.height())
+            
+            # Draw Divider Line
+            painter.setPen(Qt.GlobalColor.white)
+            painter.drawLine(split_x, 0, split_x, scaled_pixmap.height())
+            
+            painter.end()
+            scaled_pixmap = composite
+
+        self.preview_label.setPixmap(scaled_pixmap)
+        self.preview_label.setText("")
+
 

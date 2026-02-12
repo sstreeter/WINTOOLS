@@ -24,6 +24,7 @@ class ImageProcessor:
     def load_image(self, path: str) -> bool:
         """
         Load an image from file path.
+        Supports: PNG, JPG, BMP, GIF, SVG, EPS, PDF, AI.
         
         Args:
             path: Path to image file
@@ -32,9 +33,59 @@ class ImageProcessor:
             True if successful, False otherwise
         """
         try:
-            self.source_image = Image.open(path).convert("RGBA")
+            p = Path(path)
+            ext = p.suffix.lower()
+            
+            # --- Vector Logic ---
+            if ext == '.svg':
+                # SVG Support via svglib (Pure Python)
+                from svglib.svglib import svg2rlg
+                from reportlab.graphics import renderPM
+                from io import BytesIO
+                
+                # Convert SVG to ReportLab Drawing
+                drawing = svg2rlg(path)
+                
+                # Render to high-res PNG in memory (1024x1024 target)
+                # We need to scale it up if it's small defined in SVG
+                # But svglib renders at defined size. Let's render at 4x scale for quality?
+                # Actually renderPM allows scaling.
+                
+                # Get native size
+                # width = drawing.width
+                # height = drawing.height
+                
+                # Render to PNG buffer
+                img_data = BytesIO()
+                renderPM.drawToFile(drawing, img_data, fmt="PNG", dpi=300) # High DPI
+                img_data.seek(0)
+                
+                self.source_image = Image.open(img_data).convert("RGBA")
+                
+            elif ext in ['.eps', '.pdf', '.ai']:
+                # EPS/PDF Support via Ghostscript (PIL)
+                # PIL Image.open lazy loads, so strictly it doesn't fail until rasterized.
+                # However, for Vectors we want HIGH RES.
+                # PIL defaults to 72 DPI which is bad for icons.
+                
+                # We need to use Ghostscript CLI directly or PIL with 'scale' param?
+                # PIL EpsImagePlugin updates:
+                img = Image.open(path)
+                
+                # Force high resolution rasterization
+                # If we just convert(), PIL uses default DPI.
+                # We need to reload with scale.
+                img.load(scale=4) # Load at 4x resolution (High Quality)
+                
+                self.source_image = img.convert("RGBA")
+                
+            else:
+                # Standard Raster Images
+                self.source_image = Image.open(path).convert("RGBA")
+                
             self.processed_image = self.source_image.copy()
             return True
+            
         except Exception as e:
             print(f"Error loading image: {e}")
             return False
@@ -52,7 +103,8 @@ class ImageProcessor:
         }
     
     def resize_to_square(self, image: Image.Image, size: int, 
-                        maintain_aspect: bool = True) -> Image.Image:
+                        maintain_aspect: bool = True,
+                        sharpen_params: dict = None) -> Image.Image:
         """
         Resize image to square dimensions.
         
@@ -60,6 +112,7 @@ class ImageProcessor:
             image: Source image
             size: Target size (width and height)
             maintain_aspect: If True, pad to square; if False, stretch
+            sharpen_params: Optional dict with 'radius', 'percent', 'threshold' for UnsharpMask
             
         Returns:
             Resized image
@@ -78,10 +131,26 @@ class ImageProcessor:
             square.paste(image, (offset_x, offset_y))
             
             # Resize to target size
-            return square.resize((size, size), Image.Resampling.LANCZOS)
+            resized = square.resize((size, size), Image.Resampling.LANCZOS)
         else:
             # Stretch to fit
-            return image.resize((size, size), Image.Resampling.LANCZOS)
+            resized = image.resize((size, size), Image.Resampling.LANCZOS)
+            
+        # Apply Smart Sharpening
+        if sharpen_params:
+            from PIL import ImageFilter
+            # UnsharpMask parameters: radius, percent, threshold
+            radius = sharpen_params.get('radius', 0.5)
+            percent = sharpen_params.get('percent', 100)
+            threshold = sharpen_params.get('threshold', 3)
+            
+            # Apply to RGB channels mostly, but PIL UnsharpMask works on all.
+            # However, sharpening alpha can created jagged edges.
+            # Best practice: Sharpen RGB, keep Alpha clean or sharpen lightly.
+            # For icons, "snapping" alpha is actually desired for crispness.
+            resized = resized.filter(ImageFilter.UnsharpMask(radius=radius, percent=percent, threshold=threshold))
+            
+        return resized
     
     def generate_all_sizes(self, sizes: List[int] = None) -> dict:
         """
@@ -101,7 +170,18 @@ class ImageProcessor:
         
         result = {}
         for size in sizes:
-            result[size] = self.resize_to_square(self.processed_image, size)
+            # Determine Smart Sharpen parameters based on size
+            sharpen_params = None
+            if size <= 32:
+                # Aggressive sharpen for tiny icons (16, 32)
+                sharpen_params = {'radius': 0.5, 'percent': 150, 'threshold': 2}
+            elif size <= 64:
+                # Mild sharpen for medium icons (48, 64)
+                sharpen_params = {'radius': 0.5, 'percent': 100, 'threshold': 3}
+            # > 64: No sharpening (LANCZOS is sufficient and looks natural)
+            
+            result[size] = self.resize_to_square(self.processed_image, size, 
+                                                 sharpen_params=sharpen_params)
         
         return result
     
