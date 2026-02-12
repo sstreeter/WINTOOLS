@@ -68,8 +68,12 @@ Now you can just type: `ssh my-server`
         ```
 
 #### Option B: Enterprise Deployment (Intune / Tanium)
-For mass deployment, push the `Deploy-SSH-Windows.ps1` script and your master `AuthorizedKeysPayload.txt` to `C:\ProgramData\WINTOOLS\Scripts`.
-Run as **System** or **Administrator**.
+For mass deployment (Silent Install):
+1.  Package these two files: `Deploy-SSH-Windows.ps1` and `AuthorizedKeysPayload.txt`.
+2.  Configure your tool (Intune/Tanium) to run this command (System Context):
+    ```powershell
+    powershell.exe -ExecutionPolicy Bypass -File .\Deploy-SSH-Windows.ps1 -KeysFile .\AuthorizedKeysPayload.txt -DisablePasswordAuth
+    ```
 
 ## ❓ Troubleshooting & FAQ
 
