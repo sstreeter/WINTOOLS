@@ -22,12 +22,11 @@ class IconConverter:
         if options.get('flip_h'):
             processed = ImageOps.mirror(processed)
             
-        # 2. Crop Source (Square)
-        if options.get('crop_square'):
-            min_side = min(processed.size)
-            left = (processed.width - min_side) // 2
-            top = (processed.height - min_side) // 2
-            processed = processed.crop((left, top, left + min_side, top + min_side))
+            
+        # 2. Crop Source (Square) - DEPRECATED / REMOVED
+        # We now handle sizing/cropping at the Save stage (save_icon)
+        # or via explicit Crop Tool (todo).
+        # if options.get('crop_square'): ...
             
         # 3. Resize to largest needed size (e.g. 1024) for high quality downscaling
         # But first, apply background/roundness
@@ -69,40 +68,83 @@ class IconConverter:
         return processed
 
     @staticmethod
-    def save_icon(img: Image.Image, path: str, formats: list, sizes: list):
+    def save_icon(img: Image.Image, path: str, formats: list, sizes: list, options: dict = None):
         """
-        Save the processed image to the specified formats.
+        Save the processed image to the specified formats with resizing logic.
+        options['resize_to_aspect']: True (default) = Contain/Fit, False = Crop/Fill
         """
         path = Path(path)
         base_name = path.stem
         output_dir = path.parent
+        options = options or {}
         
         # Ensure sizes are sorted
         sizes = sorted(sizes, reverse=True)
         
+        # Resize Mode
+        # If resize_to_aspect is True (Checked): Contain/Fit (Sacrosanct)
+        # If False (Unchecked): Fit/Crop (Fill square)
+        use_contain = options.get('resize_to_aspect', True)
+        
         # 1. Generate Mipmaps
         mipmaps = []
         for s in sizes:
-            # High quality resize
-            res = img.resize((s, s), Image.Resampling.LANCZOS)
-            mipmaps.append(res)
+            # Determine target dimensions
+            if isinstance(s, tuple):
+                tw, th = s
+            else:
+                tw, th = s, s
+                
+            if use_contain:
+                # Sacrosanct: Fit INSIDE target rect with transparent padding
+                # Create canvas of target size
+                canvas = Image.new("RGBA", (tw, th), (0, 0, 0, 0))
+                
+                # Resize image to fit within tw x th
+                res = ImageOps.contain(img.copy(), (tw, th), Image.Resampling.LANCZOS)
+                
+                # Center it
+                x = (tw - res.width) // 2
+                y = (th - res.height) // 2
+                canvas.paste(res, (x, y))
+                mipmaps.append(canvas)
+            else:
+                # Crop/Fill: Fill the target rect, cropping edges
+                res = ImageOps.fit(img.copy(), (tw, th), Image.Resampling.LANCZOS)
+                mipmaps.append(res)
             
         # 2. Save Formats
         if 'ico' in formats:
-            # Pillow saves ICO natively. It expects a list of images or (usually) just the biggest one 
-            # and 'sizes' param, but passing a list to 'append_images' is safer for specific control.
-            # Actually, img.save(..., sizes=[...]) re-generates them. 
-            # Let's try passing the image and letting Pillow generate sizes.
-            # Better strategy for high control:
-            img.save(output_dir / f"{base_name}.ico", format='ICO', sizes=[(s, s) for s in sizes])
+            base_img = mipmaps[0]
+            other_images = mipmaps[1:] if len(mipmaps) > 1 else []
+            base_img.save(path, format='ICO', append_images=other_images)
             
         if 'icns' in formats:
-            # Pillow supports ICNS read/write
-            img.save(output_dir / f"{base_name}.icns", format='ICNS', sizes=[(s, s) for s in sizes])
+            base_img = mipmaps[0]
+            other_images = mipmaps[1:] if len(mipmaps) > 1 else []
+            base_img.save(path.with_suffix('.icns'), format='ICNS', append_images=other_images)
             
         if 'png' in formats:
-            # Save bundle
-            png_dir = output_dir / f"{base_name}_pngs"
-            png_dir.mkdir(exist_ok=True)
-            for m in mipmaps:
-                m.save(png_dir / f"{base_name}_{m.width}x{m.height}.png")
+            if len(mipmaps) == 1:
+                mipmaps[0].save(path, "PNG")
+            else:
+                png_dir = output_dir / f"{base_name}_pngs"
+                png_dir.mkdir(exist_ok=True)
+                for m in mipmaps:
+                    m.save(png_dir / f"{base_name}_{m.width}x{m.height}.png")
+                
+        if 'bmp' in formats:
+            # Similar to PNG: if multiple, folder. If single, maybe just file?
+            # Standard logic: Always folder for consistency if multiple sizes?
+            # Or if len(mipmaps) == 1, save to path directly?
+            # The prompt implies user might want single file.
+            # Let's do: If 1 size -> Path. If >1 -> Folder.
+            
+            if len(mipmaps) == 1:
+                # Save single file
+                mipmaps[0].save(path, "BMP")
+            else:
+                bmp_dir = output_dir / f"{base_name}_bmps"
+                bmp_dir.mkdir(exist_ok=True)
+                for m in mipmaps:
+                    m.save(bmp_dir / f"{base_name}_{m.width}x{m.height}.bmp")
